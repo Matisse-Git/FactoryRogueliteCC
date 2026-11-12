@@ -100,13 +100,29 @@ function UI.button(label, x, y, w, h, opts)
 end
 
 -- Upgrade card icon: 16x16, accent border, two-letter code.
-function UI.card(def, x, y)
+--   pop   1 = it just triggered, fading to 0: the card inverts and hops
+--   bad   the trigger hurt: it turns red and shakes instead
+--   lit   it is changing a machine on the board right now: a lamp in the corner
+function UI.card(def, x, y, pop, bad, lit)
   local accent = P[def.color] or P.purple
-  UI.rect(x, y, 16, 16, P.darkOf(def.color))
-  UI.frame(x, y, 16, 16, accent)
-  UI.textCenter(def.code:sub(1, 2), x + 8, y + 6, accent)
-  UI.rect(x + 2, y + 2, 2, 1, accent)
-  UI.rect(x + 12, y + 13, 2, 1, accent)
+  local fill, ink, edge = P.darkOf(def.color), accent, accent
+  pop = pop or 0
+  if pop > 0 and bad then
+    x = x + ((math.floor(pop * 8) % 2 == 0) and 1 or -1)
+    fill, ink, edge = P.red, P.dark, pop > 0.5 and P.white or P.red
+  elseif pop > 0 then
+    y = y - (pop > 0.5 and 2 or 1)
+    fill, ink, edge = accent, P.dark, pop > 0.5 and P.white or accent
+  end
+  UI.rect(x, y, 16, 16, fill)
+  UI.frame(x, y, 16, 16, edge)
+  UI.textCenter(def.code:sub(1, 2), x + 8, y + 6, ink)
+  UI.rect(x + 2, y + 2, 2, 1, ink)
+  UI.rect(x + 12, y + 13, 2, 1, ink)
+  if lit then
+    UI.rect(x + 11, y + 1, 4, 4, P.dark)
+    UI.rect(x + 12, y + 2, 2, 2, P.white)
+  end
 end
 
 function UI.emptySlot(x, y)

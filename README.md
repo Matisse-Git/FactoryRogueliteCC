@@ -41,6 +41,20 @@ lovec . --shots
   The **shop** offers 2 machines and 2 upgrades. You hold at most 5 upgrades.
 - Miss a quota and the run is over. Runs are seeded.
 
+### Reading your upgrades
+
+- An upgrade's **card pops** whenever it changes something: a sale, a machine, the shift total.
+  A harmful change (a sale zeroed by Embargo or a boss twist) flashes red and shakes instead;
+  a boss twist does this on the `BOSS:` label.
+- The **ledger** fills the box under the cards during a shift: what each upgrade earned or cost,
+  or how often it triggered. Hover a card to read its description instead.
+- The **sale popup** at the export is red for a `$0` sale, and otherwise takes the colour of the
+  upgrade that added the most.
+- **Tiles flash** where an upgrade acts on the board (a duplicated item, an oven smelt, a diamond).
+- Machines changed by a placement upgrade (Assembly Line, Direct Drive, Hand Crank) carry a
+  **pip** in its colour, while building too. Hover the card to outline them.
+- The **shift summary** plays end-of-shift upgrades one line at a time, met or not.
+
 Numbers worth knowing: a belt carries 1 item/s, a port supplies 1 item per 2 s,
 a smelter takes 4 s, a press 3 s, an assembler 6 s. The recipe book (Tab) has the rest.
 
@@ -70,7 +84,8 @@ src/run.lua            run state: kit, credits, contracts, shop
 src/data/              ALL content and balance: items, recipes, machines,
                        upgrades, contracts (quotas, bosses, payouts)
 src/gfx/               palette, pixel font, sprites (authored as text)
-src/ui/                screens: title, game, shop, recipe book
+src/ui/                screens: title, game, shop, recipe book; fx.lua holds
+                       the upgrade feedback (card pops, tile flashes)
 tests/                 headless tests, ASCII layout loader, benchmark
 tools/shots.lua        scripted play-through with screenshots
 ```
@@ -94,6 +109,12 @@ file lists every hook. For example, "iron counts as gold":
 ```
 
 Hooks run in slot order, left to right, so the order of your upgrades matters.
+
+An upgrade never declares when it triggers. `src/rules.lua` compares the sale,
+the shift multiplier or the machine before and after each hook, and remembers
+which upgrade set each rule field or added each recipe, so the card pop, the
+ledger entry and the board markers come for free. Each upgrade is credited
+with its own change in slot order, and the credits add up to the shift total.
 
 ## Status
 

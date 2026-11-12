@@ -5,6 +5,7 @@ local P = require 'src.gfx.palette'
 local Font = require 'src.gfx.font'
 local Sprites = require 'src.gfx.sprites'
 local UI = require 'src.ui.ui'
+local Fx = require 'src.ui.fx'
 local Book = require 'src.ui.book'
 local Factory = require 'src.sim.factory'
 local D = require 'src.sim.dirs'
@@ -20,6 +21,13 @@ local T = 16                 -- tile size
 local BX, BY = 0, 20         -- board origin
 local SX = 224               -- sidebar origin
 local TPS = 4                -- simulation ticks per real second at 1x
+local BEAT = 0.4             -- summary: seconds between end-of-shift lines
+local COUNT = 0.3            -- summary: seconds the total takes to count up
+local STAMP = 0.12           -- summary: seconds a new line stays highlighted
+local POPUP_LIFE = 0.5       -- sale popups: seconds on screen
+local POPUP_RISE = 32        -- sale popups: pixels per second
+local POPUP_MERGE = 0.2      -- sale popups: a sale this soon after the last
+                             -- joins its popup, so popups never pile up
 local floor, min, max = math.floor, math.min, math.max
 
 local function num(n)
@@ -33,6 +41,10 @@ function Game.enter(app)
     mode = 'intro', tool = nil, dir = 0, speed = speed,
     acc = 0, frac = 0, paused = false,
     popups = {}, summary = nil, drag = nil, book = false,
+    fx = Fx.new(),      -- card pops and tile flashes
+    reveal = nil,       -- summary playback, see finishShift
+    lit = {},           -- mods changing a machine on the board this frame
+    hoverMod = nil,     -- the upgrade whose card is under the mouse
   }
 end
 
@@ -146,12 +158,47 @@ local function startShift(app)
   g.tool, g.drag = nil, nil
   app.run:beginShift()
   g.mode, g.acc, g.frac, g.paused, g.popups = 'run', 0, 0, false, {}
+  g.fx = Fx.new()
 end
 
+-- The summary plays out: the items at once, then one end-of-shift line per
+-- BEAT (its card popping) while the total counts up. `shown` lines are up.
 local function finishShift(app)
   local g = app.g
   g.summary = app.run:endShift()
   g.mode, g.frac = 'summary', 1
+  g.reveal = { t = 0, shown = 0, n = #g.summary.results }
+end
+
+local function revealDone(g)
+  local r = g.reveal
+  return r.n == 0 or r.t >= BEAT * (r.n + 1)
+end
+
+local function completeReveal(g)
+  local r = g.reveal
+  r.t, r.shown = math.huge, r.n
+end
+
+local function advanceReveal(g, dt)
+  local r, s = g.reveal, g.summary
+  r.t = r.t + dt
+  while r.shown < r.n and r.t >= BEAT * (r.shown + 1) do
+    r.shown = r.shown + 1
+    local res = s.results[r.shown]
+    if res.fired then Fx.pop(g.fx, res.mod, res.delta < 0) end
+  end
+end
+
+-- The shift total as far as the summary has revealed it.
+local function revealedTotal(g)
+  local r, s = g.reveal, g.summary
+  local v = s.base
+  for i = 1, r.shown do
+    local res = s.results[i]
+    if res.fired then v = v + res.delta * min(1, (r.t - BEAT * i) / COUNT) end
+  end
+  return floor(v + 0.5)
 end
 
 local function stepSim(app)
@@ -159,12 +206,24 @@ local function stepSim(app)
   F:step()
   for _, ev in ipairs(F.events) do
     if ev.kind == 'sale' then
-      local last = g.popups[#g.popups]
-      if last and last.tick == F.shift.tick and last.x == ev.x and last.y == ev.y then
-        last.value = last.value + ev.value
-      else
-        g.popups[#g.popups + 1] = { x = ev.x, y = ev.y, value = ev.value, age = 0, tick = F.shift.tick }
+      -- The popup takes the colour of the mod that added the most.
+      local best, color = 0, nil
+      for _, f in ipairs(ev.fired or {}) do
+        if f.delta > best then best, color = f.delta, Fx.color(f.mod) end
       end
+      local last = g.popups[#g.popups]
+      if last and last.x == ev.x and last.y == ev.y
+          and (last.tick == F.shift.tick or last.age < POPUP_MERGE) then
+        last.value = last.value + ev.value
+        if best > last.best then last.best, last.color = best, color end
+      else
+        g.popups[#g.popups + 1] = {
+          x = ev.x, y = ev.y, value = ev.value, age = 0, tick = F.shift.tick,
+          best = best, color = color,
+        }
+      end
+    elseif ev.kind == 'trigger' then
+      Fx.trigger(g.fx, ev)
     end
   end
   if F:finished() then finishShift(app) end
@@ -198,6 +257,8 @@ end
 
 function Game.update(app, dt)
   local g = app.g
+  Fx.update(g.fx, dt)
+  if g.mode == 'summary' then advanceReveal(g, dt) end
   if g.mode == 'run' and not g.paused then
     g.acc = g.acc + dt * TPS * g.speed
     local guard = 0
@@ -211,7 +272,7 @@ function Game.update(app, dt)
   for i = #g.popups, 1, -1 do
     local p = g.popups[i]
     p.age = p.age + dt
-    if p.age > 0.9 then table.remove(g.popups, i) end
+    if p.age > POPUP_LIFE then table.remove(g.popups, i) end
   end
 end
 
@@ -322,6 +383,27 @@ local function drawBoard(app)
     end
   end
 
+  -- Machines changed by a speed or draw mod where they stand carry a pip per
+  -- mod, while building too: these upgrades are placement puzzles. Hovering
+  -- the upgrade's card outlines its machines.
+  g.lit = {}
+  for i = 1, #buildings do
+    local e = buildings[i]
+    local mods = e.machine and run.rules:affecting(F, e)
+    if mods then
+      local x, y = BX + e.pos.x * T, BY + e.pos.y * T
+      UI.rect(x, y, #mods * 3 + 1, 4, P.dark)
+      for k = 1, #mods do
+        local m = mods[k]
+        g.lit[m] = true
+        UI.rect(x + 1 + (k - 1) * 3, y + 1, 2, 2, Fx.color(m))
+        if m == g.hoverMod then UI.frame(x, y, T, T, Fx.color(m)) end
+      end
+    end
+  end
+
+  Fx.drawFlashes(g.fx, BX, BY, T)
+
   -- Hover, ghost and tooltip.
   local overlay = g.mode == 'intro' or g.mode == 'summary' or g.mode == 'over' or g.mode == 'win' or g.book
   local cx, cy = cellAt(UI.mx, UI.my)
@@ -345,14 +427,18 @@ local function drawBoard(app)
     end
   end
 
-  -- Sale popups.
+  -- Sale popups: red when the sale was zeroed, the colour of the mod that
+  -- added the most when one did, green for a plain sale.
   for _, p in ipairs(g.popups) do
-    local label = '+$' .. p.value
+    local label, color = '+$' .. p.value, p.color or P.green
+    if p.value == 0 then label, color = '$0', P.red end
     local x = BX + p.x * T + 8 - Font.width(label) / 2
     x = min(x, SX - Font.width(label) - 2)
-    local y = BY + p.y * T - 6 - p.age * 14
+    -- They rise, or sink where the top bar would swallow them.
+    local y = BY + p.y * T - 6 - p.age * POPUP_RISE
+    if p.y < 2 then y = BY + (p.y + 1) * T + 1 + p.age * POPUP_RISE end
     UI.text(label, x + 1, y + 1, P.dark)
-    UI.text(label, x, y, P.green)
+    UI.text(label, x, y, color)
   end
 end
 
@@ -369,7 +455,14 @@ local function drawTopBar(app)
   local label = 'CONTRACT ' .. c.index .. '/' .. run:total()
   UI.text(label, 3, 3, P.text)
   if c.boss then
-    UI.text('BOSS: ' .. c.boss.name, 3 + Font.width(label) + 8, 3, P.red)
+    -- The boss has no card: its label takes the hit when its twist bites.
+    local text, bx = 'BOSS: ' .. c.boss.name, 3 + Font.width(label) + 8
+    local pop = Fx.popOf(g.fx, c.boss)
+    if pop > 0 then
+      bx = bx + Fx.shake(pop)
+      UI.rect(bx - 2, 2, Font.width(text) + 4, 7, P.red)
+    end
+    UI.text(text, bx, 3, pop > 0 and P.dark or P.red)
     if UI.inside(0, 0, SX, 9) then
       UI.tip = { title = c.boss.name, color = P.red, lines = { c.boss.desc } }
     end
@@ -380,6 +473,9 @@ local function drawTopBar(app)
   UI.textRight('SHIFT ' .. shiftNo .. '/' .. rules.shifts, SX - 4, 3, P.dim)
 
   local earned = run.progress + ((g.mode == 'run') and F.shift.revenue or 0)
+  if g.mode == 'summary' then   -- no spoilers while the summary plays out
+    earned = earned - g.summary.total + revealedTotal(g)
+  end
   local bw = 112
   UI.rect(3, 11, bw, 6, P.bg)
   UI.rect(3, 11, floor(bw * min(1, earned / c.quota)), 6, earned >= c.quota and P.green or P.gold)
@@ -391,6 +487,32 @@ local function drawTopBar(app)
 end
 
 ---------------------------------------------------------------- drawing: sidebar
+
+-- The shift ledger: what each upgrade (in slot order) and the boss did this
+-- shift, as { mod, delta, n }. Nil if there is nobody to list. End-of-shift
+-- credit stays out until the summary has revealed it.
+local function ledgerRows(app)
+  local g, run = app.g, app.run
+  local ledger = run.factory.shift.ledger
+  local hidden = {}
+  if g.mode == 'summary' then
+    for i = g.reveal.shown + 1, g.reveal.n do
+      local res = g.summary.results[i]
+      if res.fired then hidden[res.mod] = res.delta end
+    end
+  end
+  local rows = {}
+  local function add(mod)
+    local rec = ledger[mod]
+    if not rec then return end
+    local held = hidden[mod]
+    rows[#rows + 1] = { mod = mod, delta = rec.delta - (held or 0), n = rec.n - (held and 1 or 0) }
+  end
+  for _, id in ipairs(run.upgrades) do add(Upgrades.byId[id]) end
+  local boss = run:contract().boss
+  if boss then add(boss) end
+  return #rows > 0 and rows or nil
+end
 
 local function drawSidebar(app)
   local g, run = app.g, app.run
@@ -449,27 +571,43 @@ local function drawSidebar(app)
     end
   end
 
-  -- Upgrades.
-  UI.text('UPGRADES', SX + 4, 89, P.dim)
+  -- Upgrades. A card pops when its upgrade triggers.
+  UI.text('UPGRADES', SX + 4, 88, P.dim)
+  g.hoverMod = nil
   for i = 1, Contracts.upgradeSlots do
     local x, y = SX + 3 + (i - 1) * 18, 96
     local id = run.upgrades[i]
     if id then
       local def = Upgrades.byId[id]
-      UI.card(def, x, y)
-      if UI.inside(x, y, 16, 16) then UI.tip = upgradeTip(def) end
+      local pop, bad = Fx.popOf(g.fx, def)
+      UI.card(def, x, y, pop, bad, g.lit[def])
+      if UI.inside(x, y, 16, 16) then
+        UI.tip = upgradeTip(def)
+        g.hoverMod = def
+      end
     else
       UI.emptySlot(x, y)
     end
   end
 
-  -- Tooltip box.
+  -- Tooltip box. With nothing hovered during a shift it holds the ledger.
   UI.panel(SX + 3, 115, 90, 46, P.bg, P.faint)
-  local tip = UI.tip or defaultTip(app)
-  UI.text(tip.title, SX + 6, 118, tip.color or P.text)
-  local y = 126
-  for _, s in ipairs(tip.lines) do
-    if s and y < 156 then y = UI.paragraph(s, SX + 6, y, 21, P.dim) end
+  local rows = not UI.tip and live and ledgerRows(app)
+  if rows then
+    for i, row in ipairs(rows) do
+      local y = 111 + i * 7
+      local amount, color = Fx.amount(row)
+      local name = Fx.fit(row.mod.name, 84 - Font.width(amount) - 3)
+      UI.text(name, SX + 6, y, row.n > 0 and Fx.color(row.mod) or P.faint)
+      UI.textRight(amount, SX + 90, y, color)
+    end
+  else
+    local tip = UI.tip or defaultTip(app)
+    UI.text(tip.title, SX + 6, 118, tip.color or P.text)
+    local y = 126
+    for _, s in ipairs(tip.lines) do
+      if s and y < 156 then y = UI.paragraph(s, SX + 6, y, 21, P.dim) end
+    end
   end
 
   -- Controls.
@@ -560,13 +698,29 @@ local function drawSummary(app)
   end
   UI.rect(x + 8, yy + 1, w - 16, 1, P.line)
   yy = yy + 5
-  for _, note in ipairs(s.notes) do
-    UI.text(note[1], x + 8, yy, P.purple)
-    UI.textRight(note[2], x + w - 8, yy, P.purple)
+  -- End-of-shift mods stamp in one at a time, met or not.
+  local r = g.reveal
+  for i = 1, r.n do
+    if i <= r.shown then
+      local res = s.results[i]
+      if res.fired then
+        local fresh = r.t - BEAT * i < STAMP
+        local color = Fx.color(res.mod)
+        if fresh then UI.rect(x + 6, yy - 1, w - 12, 7, color) end
+        local amount = (res.label and (res.label .. '  ') or '') .. Fx.money(res.delta)
+        UI.text(res.mod.name, x + 8, yy, fresh and P.dark or color)
+        UI.textRight(amount, x + w - 8, yy, fresh and P.dark or color)
+      else
+        UI.text(res.mod.name, x + 8, yy, P.faint)
+        UI.textRight('NOT MET', x + w - 8, yy, P.faint)
+      end
+    end
     yy = yy + 8
   end
   UI.text('SHIFT TOTAL', x + 8, yy, P.text)
-  UI.textRight('$' .. s.total, x + w - 8, yy, P.gold)
+  UI.textRight('$' .. revealedTotal(g), x + w - 8, yy, P.gold)
+  if not revealDone(g) then return end
+
   yy = yy + 9
   local met = run.progress >= c.quota
   UI.text('CONTRACT', x + 8, yy, P.dim)
@@ -621,6 +775,10 @@ end
 function Game.press(app, x, y, b)
   local g = app.g
   if g.book then g.book = false; return end
+  if g.mode == 'summary' and not revealDone(g) then
+    completeReveal(g)     -- the first press only finishes the playback
+    return
+  end
   local cx, cy = cellAt(x, y)
   if g.mode ~= 'build' or not cx then
     if b == 2 and g.mode == 'build' then g.tool = nil end
@@ -705,7 +863,9 @@ function Game.key(app, key)
     elseif key == '2' then g.speed, g.paused = 2, false
     elseif key == '3' then g.speed, g.paused = 4, false end
   elseif g.mode == 'summary' then
-    if key == 'space' or key == 'return' then afterSummary(app) end
+    if key == 'space' or key == 'return' then
+      if revealDone(g) then afterSummary(app) else completeReveal(g) end
+    end
   end
 end
 

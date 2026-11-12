@@ -257,6 +257,111 @@ return function(App)
     wait(2)
     shot('12_summary_late')
 
+    ---------------------------------------------------------- upgrade feedback
+    local Upgrades = require 'src.data.upgrades'
+    local Contracts = require 'src.data.contracts'
+    local U = Upgrades.byId
+    local function clearBoard()
+      for yy = 0, Factory.H - 1 do
+        for xx = 0, Factory.W - 1 do App.run.factory:remove(xx, yy) end
+      end
+    end
+    local function firstPortRow()
+      for _, e in ipairs(App.run.factory.world:query('building')) do
+        if e.port and e.port.item ~= 'coal' then return e.pos.y end
+      end
+    end
+    -- Run single ticks until one has every wanted kind of trigger.
+    local function stepUntil(limit, ...)
+      local wanted = { ... }
+      for _ = 1, limit do
+        if App.g.mode ~= 'run' then return false end
+        App.g.acc = 1
+        wait(1)
+        local seen = {}
+        for _, ev in ipairs(App.run.factory.events) do
+          if ev.kind == 'trigger' then seen[ev.what] = true end
+        end
+        local ok = true
+        for _, what in ipairs(wanted) do ok = ok and seen[what] end
+        if ok then return true end
+        wait(14)                     -- about a tick at 1x, so popups spread out
+      end
+      return false
+    end
+
+    -- Build mode: machines changed by a static modifier carry pips.
+    Game.afterSummary(App)
+    clearBoard()
+    App.run.kit = { smelter = 4, press = 2, splitter = 1, bridge = 1, generator = 1, assembler = 1 }
+    App.run.upgrades = { 'assembly_line', 'direct_drive', 'isolation' }
+    App.run:refreshRules()
+    autoBuild()
+    local py = firstPortRow()
+    Game.placeAt(App, 'smelter', 3, py > 0 and py - 1 or py + 1, 0)
+    App.move(224 + 3 + 8, 104)
+    wait(3)
+    expect('pips: static modifiers light their cards', App.g.lit[U.assembly_line] and App.g.lit[U.direct_drive])
+    expect('pips: hovering a card picks its machines', App.g.hoverMod == U.assembly_line)
+    shot('14_build_pips')
+
+    -- A shift: cards pop, tiles flash, the ledger fills in.
+    clearBoard()
+    App.run.upgrades = { 'scenic_route', 'embargo', 'leaky_splitter', 'perfect_ratio', 'minimalist' }
+    App.run:refreshRules()
+    autoBuild()
+    Game.placeAt(App, 'splitter', 7, py, 0)
+    App.move(300, 90)                -- off every card, so the ledger shows
+    Game.startShift(App)
+    App.g.speed = 1
+    App.g.acc = 20.5
+    wait(40)
+    local both = stepUntil(30, 'sale', 'dup') or stepUntil(8, 'sale')
+    expect('triggers: a sale and a duplicate in one tick', both)
+    expect('triggers: the card pops', next(App.g.fx.pops) ~= nil)
+    local ledger = App.run.factory.shift.ledger
+    expect('triggers: the ledger fills in', ledger[U.scenic_route].n > 0 and ledger[U.leaky_splitter].n > 0)
+    shot('15_run_triggers')
+
+    -- The summary plays out one end-of-shift line at a time.
+    Game.fastForward(App)
+    expect('reveal: one line per end-of-shift upgrade', App.g.mode == 'summary' and App.g.reveal.n == 2)
+    App.g.reveal.t = 0.4 * 2 + 0.02
+    wait(1)
+    shot('16_summary_reveal')
+    click(170, 157)
+    expect('reveal: the first click only finishes it', App.g.mode == 'summary' and App.g.reveal.shown == 2)
+    App.move(300, 90)
+    wait(2)
+    shot('17_summary_done')
+    click(170, 157)
+    expect('reveal: the second click moves on', App.g.mode == 'build')
+
+    -- A boss twist that bites shakes the boss label.
+    for _, b in ipairs(Contracts.bosses) do
+      if b.id == 'tariff' then App.run.bosses[3] = b end
+    end
+    App.run.index = 8
+    App.run:advance()
+    Game.enter(App)
+    App.g.mode = 'build'
+    App.run.upgrades = { 'scenic_route' }
+    App.run:refreshRules()
+    clearBoard()
+    autoBuild()
+    App.move(300, 90)
+    Game.startShift(App)
+    App.g.acc = 20.5
+    wait(40)
+    local bitten = false
+    for _ = 1, 30 do
+      stepUntil(1, 'sale')
+      if App.g.fx.pops[App.run:contract().boss] then bitten = true; break end
+    end
+    expect('boss: Tariff triggers on a copper sale', bitten)
+    shot('18_boss_trigger')
+    Game.fastForward(App)
+
     -- Lose on purpose: burn the remaining shifts with an empty board.
     for yy = 0, Factory.H - 1 do
       for xx = 0, Factory.W - 1 do App.run.factory:remove(xx, yy) end
