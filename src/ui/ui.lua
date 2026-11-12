@@ -63,11 +63,14 @@ function UI.paragraph(s, x, y, maxChars, c, lineH)
   return y
 end
 
-function UI.sprite(img, x, y, rot, alpha)
+-- rot = quarter turns clockwise; flip mirrors the sprite top-to-bottom
+-- before it is rotated.
+function UI.sprite(img, x, y, rot, alpha, flip)
   love.graphics.setColor(1, 1, 1, alpha or 1)
-  if rot and rot ~= 0 then
+  if (rot and rot ~= 0) or flip then
     local w, h = img:getDimensions()
-    love.graphics.draw(img, x + w / 2, y + h / 2, rot * math.pi / 2, 1, 1, w / 2, h / 2)
+    love.graphics.draw(img, x + w / 2, y + h / 2, (rot or 0) * math.pi / 2,
+      1, flip and -1 or 1, w / 2, h / 2)
   else
     love.graphics.draw(img, x, y)
   end

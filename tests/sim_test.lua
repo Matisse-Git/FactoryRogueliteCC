@@ -263,6 +263,31 @@ return function()
     check('Conveyor Oven smelts ore passing a generator', count(s, 'iron_ingot') > 0, soldString(s))
   end
 
+  -- 10d. Belt shapes (corners and merges) follow what feeds each belt.
+  do
+    local layout = require 'tests.layout'
+    local Links = require 'src.sim.links'
+    local F = layout({
+      'bv .. bv .. sv .. ..',
+      'b> b> b> b> b> .. ..',
+      '.. .. b^ .. .. .. ..',
+      '.. b> .. b> x. b> ..',
+      '.. b^ .. .. x. b> ..',
+    })
+    local function shape(x, y) return Links.beltShape(F, F:at(x, y)) end
+    check('belt fed only from its left is a left corner', shape(0, 1).corner == 'left')
+    check('belt fed only from its right is a right corner', shape(1, 3).corner == 'right')
+    local s = shape(1, 1)
+    check('belt fed from behind is straight', s.back and not s.corner and not s.left and not s.right)
+    s = shape(2, 1)
+    check('belt fed from behind and both sides is a merge', s.back and s.left and s.right and not s.corner)
+    s = shape(4, 1)
+    check('a machine output from the side also opens the rail', s.back and s.left)
+    check('a belt feeds through a bridge', shape(5, 3).back == true)
+    check('an unfed bridge feeds nothing', shape(5, 4).back == false)
+    check('an unfed belt is straight', shape(0, 0).corner == nil and not shape(0, 0).back)
+  end
+
   -- 10c. Boss rubble comes and goes with the contract.
   do
     local run = Run.new(5)

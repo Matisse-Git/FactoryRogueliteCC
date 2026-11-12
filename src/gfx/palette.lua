@@ -29,7 +29,7 @@ local raw = {
   cyan = '8ef0f0', cyanD = '2f7f8c',
   orange = 'f08a30', yellow = 'ffe060', white = 'ffffff',
 
-  belt = '2a2839', beltL = '3d3a57', rail = '5a5780',
+  belt = '2a2839', beltL = '4d4975', rail = '6c6898',
 }
 
 local P = {}

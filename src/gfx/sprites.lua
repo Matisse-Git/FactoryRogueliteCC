@@ -4,7 +4,7 @@
 local P = require 'src.gfx.palette'
 local Items = require 'src.data.items'
 
-local Sprites = { item = {}, machine = {}, belt = {} }
+local Sprites = { item = {}, machine = {}, belt = {}, corner = {} }
 
 -- Characters used in the sprite text below.
 local MAP = {
@@ -324,6 +324,53 @@ local function beltFrame(frame)
   return image(data)
 end
 
+-- Rounded corner: exits east, fed from the north (the belt's left side).
+-- Flip it vertically for a feed from the south; rotate for other headings.
+-- The chevrons fan around the top-right corner of the tile and stay in
+-- phase with the straight belts on either end.
+local function cornerFrame(frame)
+  local data = love.image.newImageData(16, 16)
+  for y = 0, 15 do
+    for x = 0, 15 do
+      local dx, dy = 16 - (x + 0.5), y + 0.5
+      local r = math.sqrt(dx * dx + dy * dy)
+      if r >= 2 and r < 14 then
+        local c
+        if r < 3 or r >= 13 then
+          c = P.rail
+        else
+          local along = math.atan2(dy, dx) / (math.pi / 2) * 16
+          local v = (along + math.abs(r - 8) - 0.5 - frame * 2) % 8
+          c = (v < 2) and P.beltL or P.belt
+        end
+        data:setPixel(x, y, c[1], c[2], c[3], 1)
+      end
+    end
+  end
+  return image(data)
+end
+
+-- Overlay for a straight belt (facing east) that is fed from the north:
+-- opens the rail and carries the incoming belt's surface in.
+local function inletTile()
+  local data = love.image.newImageData(16, 16)
+  for y = 0, 2 do
+    for x = 2, 13 do
+      local edge = x == 2 or x == 13
+      if not (edge and y == 2) then
+        local c = edge and P.rail or P.belt
+        data:setPixel(x, y, c[1], c[2], c[3], 1)
+      end
+    end
+  end
+  -- A small arrowhead pointing into the belt.
+  for i = 0, 2 do
+    data:setPixel(5 + i, i, P.beltL[1], P.beltL[2], P.beltL[3], 1)
+    data:setPixel(10 - i, i, P.beltL[1], P.beltL[2], P.beltL[3], 1)
+  end
+  return image(data)
+end
+
 local function bridgeTile()
   local data = love.image.newImageData(16, 16)
   local function px(x, y, c) data:setPixel(x, y, c[1], c[2], c[3], 1) end
@@ -344,7 +391,11 @@ end
 
 function Sprites.load()
   Sprites.floor = floorTile()
-  for f = 0, 3 do Sprites.belt[f + 1] = beltFrame(f) end
+  for f = 0, 3 do
+    Sprites.belt[f + 1] = beltFrame(f)
+    Sprites.corner[f + 1] = cornerFrame(f)
+  end
+  Sprites.inlet = inletTile()
   for _, kind in ipairs({ 'smelter', 'press', 'assembler', 'crusher', 'polisher',
                           'generator', 'splitter', 'export', 'port' }) do
     Sprites.machine[kind] = chassis(kind)

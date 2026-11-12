@@ -8,6 +8,7 @@ local UI = require 'src.ui.ui'
 local Book = require 'src.ui.book'
 local Factory = require 'src.sim.factory'
 local D = require 'src.sim.dirs'
+local Links = require 'src.sim.links'
 local Machines = require 'src.data.machines'
 local Items = require 'src.data.items'
 local Upgrades = require 'src.data.upgrades'
@@ -224,6 +225,20 @@ end
 
 local STATUS_COLOR = { work = P.green, idle = P.faint, blocked = P.yellow }
 
+-- A belt takes its shape from what feeds it: a lone side feed makes a
+-- rounded corner, any other side feed opens the rail on that side.
+local function drawBelt(F, e, x, y, frame)
+  local dir = e.building.dir
+  local shape = Links.beltShape(F, e)
+  if shape.corner then
+    UI.sprite(Sprites.corner[frame], x, y, dir, 1, shape.corner == 'right')
+    return
+  end
+  UI.sprite(Sprites.belt[frame], x, y, dir)
+  if shape.left then UI.sprite(Sprites.inlet, x, y, dir) end
+  if shape.right then UI.sprite(Sprites.inlet, x, y, dir, 1, true) end
+end
+
 local function drawBuilding(e, x, y, live, beltFrame, alpha)
   local b = e.building
   local kind = b.kind
@@ -270,7 +285,9 @@ local function drawBoard(app)
   local buildings = world:query('building')
   for i = 1, #buildings do
     local e = buildings[i]
-    if e.belt or e.bridge or e.splitter then
+    if e.belt then
+      drawBelt(F, e, BX + e.pos.x * T, BY + e.pos.y * T, beltFrame)
+    elseif e.bridge or e.splitter then
       drawBuilding(e, BX + e.pos.x * T, BY + e.pos.y * T, live, beltFrame)
     end
   end

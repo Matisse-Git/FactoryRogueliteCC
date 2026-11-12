@@ -125,6 +125,23 @@ return function(App)
     expect('keys: Tab opens the recipe book', App.g.book == true)
     App.keypressed('tab')
 
+    ---------------------------------------------------------- belt shapes
+    local demo = {
+      -- a closed loop: four corners, both handednesses appear when reversed
+      { 2, 6, 0 }, { 3, 6, 0 }, { 4, 6, 1 }, { 4, 7, 1 }, { 4, 8, 2 }, { 3, 8, 2 }, { 2, 8, 3 }, { 2, 7, 3 },
+      -- a line with feeds from both sides, then an S-bend
+      { 6, 6, 0 }, { 7, 6, 0 }, { 8, 6, 0 }, { 9, 6, 0 }, { 10, 6, 1 }, { 10, 7, 1 }, { 10, 8, 0 }, { 11, 8, 0 },
+      { 7, 5, 1 }, { 7, 4, 1 }, { 8, 7, 3 }, { 8, 8, 3 },
+      -- counter-clockwise turns
+      { 6, 2, 2 }, { 5, 2, 2 }, { 4, 2, 3 }, { 4, 1, 3 }, { 4, 0, 0 }, { 5, 0, 0 }, { 6, 0, 1 }, { 6, 1, 1 },
+    }
+    for _, b in ipairs(demo) do Game.placeAt(App, 'belt', b[1], b[2], b[3]) end
+    Game.placeAt(App, 'smelter', 9, 5, 1)
+    App.move(300, 100)
+    wait(2)
+    shot('03a_belt_shapes')
+    App.keypressed('x')
+
     ---------------------------------------------------------- contract 1
     autoBuild()
     App.g.tool, App.g.dir = 'splitter', 1
