@@ -75,7 +75,11 @@ local function ovenSystem(world, F)
     local it = pair.slot.item
     if it and pair.gen.machine.burn > 0 then
       local ingot = Upgrades.INGOT_OF[it.item.type]
-      if ingot then it.item.type = ingot end
+      if ingot then
+        it.item.type = ingot
+        local pos = pair.slot.e.pos
+        F:trigger(F.rules.owner.oven, pos.x, pos.y, 0, 'smelt')
+      end
     end
   end
 end
@@ -200,6 +204,10 @@ function Factory:beginShift(rules, info)
     self.recipes[kind] = rules:recipesFor(kind)
   end
 
+  -- What each mod did this shift: $ credited and how often it triggered.
+  local ledger = {}
+  for _, m in ipairs(rules.mods) do ledger[m] = { delta = 0, n = 0 } end
+
   self.slots = {}
   self.ovenBelts = {}
   local list = self.world:query('building')
@@ -222,6 +230,9 @@ function Factory:beginShift(rules, info)
       Machine.reset(e)
       e.machine.speed = rules:speed(self, e)
       e.machine.draw = rules:draw(self, e, e.machine.def.draw or 0)
+      -- Mods that change this machine where it stands count once per machine.
+      e.machine.mods = rules:affecting(self, e)
+      for _, m in ipairs(e.machine.mods or {}) do ledger[m].n = ledger[m].n + 1 end
       if e.machine.def.generator then
         for d = 0, 3 do
           local n = self:at(e.pos.x + D.DX[d], e.pos.y + D.DY[d])
@@ -235,11 +246,28 @@ function Factory:beginShift(rules, info)
 
   self.shift = {
     tick = 0, len = rules.shiftLen,
-    revenue = 0, sales = 0, sold = {}, order = {},
+    revenue = 0, plain = 0, sales = 0, sold = {}, order = {},
     supply = rules.basePower, demand = 0, factor = 1,
+    ledger = ledger,
   }
   self.events = {}
   rules:resetShift()
+end
+
+-- A mod did something at tile (x, y): book it and tell whoever is watching.
+-- `what` is 'sale' | 'dup' | 'smelt' | 'craft' | 'polish'. A nil mod (a rule
+-- field nobody owns) is ignored.
+function Factory:trigger(mod, x, y, delta, what)
+  if not mod then return end
+  local ledger = self.shift.ledger
+  local rec = ledger[mod]
+  if not rec then
+    rec = { delta = 0, n = 0 }
+    ledger[mod] = rec
+  end
+  rec.delta = rec.delta + delta
+  rec.n = rec.n + 1
+  self.events[#self.events + 1] = { kind = 'trigger', mod = mod, x = x, y = y, delta = delta, what = what }
 end
 
 function Factory:step()
@@ -254,8 +282,9 @@ end
 
 function Factory:sell(itemE, exportE)
   local s = self.shift
-  local value, ctx = self.rules:sale(itemE.item, s.tick, s.len)
+  local value, ctx, fired = self.rules:sale(itemE.item, s.tick, s.len)
   s.revenue = s.revenue + value
+  s.plain = s.plain + ctx.plain
   s.sales = s.sales + 1
   local rec = s.sold[ctx.type]
   if not rec then
@@ -268,7 +297,11 @@ function Factory:sell(itemE, exportE)
   local ex = exportE.export
   ex.sold = ex.sold + 1
   ex.log[ctx.type] = (ex.log[ctx.type] or 0) + 1
-  self.events[#self.events + 1] = { kind = 'sale', x = exportE.pos.x, y = exportE.pos.y, value = value }
+  local x, y = exportE.pos.x, exportE.pos.y
+  self.events[#self.events + 1] = { kind = 'sale', x = x, y = y, value = value, fired = fired }
+  if fired then
+    for i = 1, #fired do self:trigger(fired[i].mod, x, y, fired[i].delta, 'sale') end
+  end
 end
 
 -- Close the shift: apply end-of-shift rules and return the summary.
@@ -288,11 +321,27 @@ function Factory:endShift()
     sold = s.sold, kinds = #s.order,
     perfect = any and perfect, unplaced = self.unplaced,
   }
-  self.rules:shiftEnd(sc)
+  local results = self.rules:shiftEnd(sc)
+  local total = math.floor(s.revenue * sc.mult + 0.5)
+  local last
+  for _, res in ipairs(results) do
+    if res.fired then
+      local rec = s.ledger[res.mod]
+      rec.delta = rec.delta + res.delta
+      rec.n = rec.n + 1
+      last = res
+    end
+  end
+  if last then   -- rounding goes to the last multiplier, as it does per sale
+    local resid = total - s.revenue * sc.mult
+    last.delta = last.delta + resid
+    s.ledger[last.mod].delta = s.ledger[last.mod].delta + resid
+  end
+  -- `plain` + every ledger delta = `total`.
   return {
-    base = s.revenue, mult = sc.mult, notes = sc.notes,
-    total = math.floor(s.revenue * sc.mult + 0.5),
+    base = s.revenue, mult = sc.mult, notes = sc.notes, total = total,
     sold = s.sold, order = s.order, perfect = sc.perfect,
+    plain = s.plain, ledger = s.ledger, results = results,
   }
 end
 

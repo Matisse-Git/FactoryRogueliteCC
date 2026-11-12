@@ -216,6 +216,7 @@ function Transfer.system(world, F)
         pos = { x = S.e.pos.x, y = S.e.pos.y },
         prev = { x = S.e.pos.x, y = S.e.pos.y },
       })
+      F:trigger(F.rules.owner.leakEvery, S.e.pos.x, S.e.pos.y, 0, 'dup')
     else
       S.item = nil
     end

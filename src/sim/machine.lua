@@ -144,12 +144,17 @@ function M.update(F, e)
     if m.craft.p >= def.time then
       carry = m.craft.p - def.time
       if m.craft.polish then
-        emit(F, e, m.craft.polish.type, m.craft.polish.polished + 1)
+        local polished = m.craft.polish.polished + 1
+        emit(F, e, m.craft.polish.type, polished)
+        -- A polish beyond the first is the doing of whoever raised the limit.
+        if polished > 1 then F:trigger(F.rules.owner.maxPolish, e.pos.x, e.pos.y, 0, 'polish') end
       else
         local outs = m.craft.r.outputs
         for i = 1, #outs do
           for _ = 1, outs[i][2] do emit(F, e, outs[i][1]) end
         end
+        -- A recipe added by a mod credits that mod.
+        F:trigger(F.rules.recipeOwner[m.craft.r], e.pos.x, e.pos.y, 0, 'craft')
       end
       m.craft = nil
     end

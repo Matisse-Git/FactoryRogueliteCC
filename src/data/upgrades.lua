@@ -14,6 +14,10 @@
 --
 -- ctx = { type, form, mats, polished, dist, tick, len, value }
 -- sc  = { revenue, mult, notes, sold, kinds, perfect, unplaced }
+--
+-- An upgrade never says when it "triggers": src/rules.lua sees what each hook
+-- changed and the game shows it (card pop, ledger, board markers). Write the
+-- hook and the feedback follows.
 
 local Recipes = require 'src.data.recipes'
 local D = require 'src.sim.dirs'

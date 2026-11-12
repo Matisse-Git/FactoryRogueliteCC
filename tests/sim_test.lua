@@ -36,6 +36,24 @@ local function runShift(F, r)
   return F:endShift()
 end
 
+-- Like runShift, but also logs every trigger event. `sale` is the number of
+-- the sale it happened on (a sale's triggers follow its sale event).
+local function watchShift(F, r)
+  F:beginShift(r or Rules.new({}))
+  local log = { sales = 0 }
+  while not F:finished() do
+    F:step()
+    for _, ev in ipairs(F.events) do
+      if ev.kind == 'sale' then
+        log.sales = log.sales + 1
+      elseif ev.kind == 'trigger' then
+        log[#log + 1] = { mod = ev.mod, what = ev.what, delta = ev.delta, x = ev.x, y = ev.y, sale = log.sales }
+      end
+    end
+  end
+  return F:endShift(), log
+end
+
 local function soldString(s)
   local parts = {}
   for _, t in ipairs(s.order) do parts[#parts + 1] = t .. '=' .. s.sold[t].n end
@@ -350,6 +368,132 @@ return function()
     check('run API: shift produces revenue', s.total > 0 and run.progress == s.total, s.total)
     check('run API: status is set', s.status == 'next' or s.status == 'cleared', s.status)
     check('quota table matches contract count', #Contracts.quotas == 9)
+  end
+
+  -- 13. Triggers: which mod did what, when, and for how much.
+  do
+    local layout = require 'tests.layout'
+    local U = Upgrades.byId
+    local function straight(port)
+      local F = Factory.new()
+      F:place('port', 0, 2, 0, { item = port or 'iron_ore' })
+      belts(F, 1, 12, 2)
+      F:place('export', 13, 2, 2)
+      return F
+    end
+    local function near(a, b) return math.abs(a - b) < 1e-6 end
+    local function boss(id)
+      for _, b in ipairs(Contracts.bosses) do
+        if b.id == id then return b end
+      end
+    end
+    -- plain value + everything credited to a mod
+    local function ledgerSum(s)
+      local t = s.plain
+      for _, rec in pairs(s.ledger) do t = t + rec.delta end
+      return t
+    end
+    local function all(log, test)
+      for _, t in ipairs(log) do
+        if not test(t) then return false end
+      end
+      return true
+    end
+
+    -- Sale-time: only when the hook changed the sale.
+    local s, log = watchShift(straight(), rules('bulk_order'))
+    local at = {}
+    for _, t in ipairs(log) do at[#at + 1] = t.sale end
+    check('Bulk Order triggers on exactly every 8th sale', table.concat(at, ',') == '8,16,24', table.concat(at, ','))
+    local rec = s.ledger[U.bulk_order]
+    check('Bulk Order is credited $3 a time', rec.n == 3 and near(rec.delta, 9) and s.total == 33, rec.delta)
+
+    s, log = watchShift(layout({ 'I> b> b> E<' }), rules('scenic_route'))
+    check('Scenic Route stays quiet under 4 tiles', #log == 0 and s.ledger[U.scenic_route].n == 0 and s.total > 0, #log)
+    s, log = watchShift(straight(), rules('scenic_route'))
+    check('Scenic Route triggers on every sale off a long belt',
+      #log == 24 and near(s.ledger[U.scenic_route].delta, 72) and all(log, function(t) return t.what == 'sale' and t.x == 13 end), #log)
+
+    s, log = watchShift(straight(), rules('gold_standard'))
+    check('Gold Standard stays quiet with no gold sold', #log == 0, #log)
+
+    s, log = watchShift(straight(), rules('fools_gold'))
+    check("Fool's Gold is credited the difference in type", near(s.ledger[U.fools_gold].delta, 24) and #log == 24, s.ledger[U.fools_gold].delta)
+
+    -- Harmful triggers have a negative delta.
+    s, log = watchShift(straight('copper_ore'), rules('embargo'))
+    check('Embargo on copper registers as harmful',
+      #log == 24 and all(log, function(t) return t.delta < 0 end) and s.total == 0 and near(s.ledger[U.embargo].delta, -24), s.total)
+    s, log = watchShift(straight(), rules('embargo'))
+    check('Embargo on iron registers as a gain', #log == 24 and all(log, function(t) return t.delta > 0 end) and s.total == 72, s.total)
+    local tariff = boss('tariff')
+    s, log = watchShift(straight('copper_ore'), Rules.new({ tariff }))
+    check('Tariff is credited to the boss, and is harmful',
+      #log == 24 and all(log, function(t) return t.mod == tariff and t.delta < 0 end) and near(s.ledger[tariff].delta, -24), #log)
+    s, log = watchShift(straight('copper_ore'), Rules.new({ U.embargo, tariff }))
+    check('a sale already worth $0 triggers nothing further', s.ledger[tariff].n == 0 and s.ledger[U.embargo].n == 24, s.ledger[tariff].n)
+
+    -- Credit is marginal, in slot order.
+    s = watchShift(straight(), rules('fools_gold', 'scrap_dealer'))
+    check("slot order: Fool's Gold first", near(s.ledger[U.fools_gold].delta, 24) and near(s.ledger[U.scrap_dealer].delta, 144) and s.total == 192,
+      s.ledger[U.fools_gold].delta .. ' / ' .. s.ledger[U.scrap_dealer].delta)
+    s = watchShift(straight(), rules('scrap_dealer', 'fools_gold'))
+    check('slot order: Scrap Dealer first', near(s.ledger[U.scrap_dealer].delta, 48) and near(s.ledger[U.fools_gold].delta, 120) and s.total == 192,
+      s.ledger[U.scrap_dealer].delta .. ' / ' .. s.ledger[U.fools_gold].delta)
+
+    -- The ledger always adds up, fractions and multipliers included.
+    s = watchShift(straight(), rules('fools_gold', 'gold_standard', 'scenic_route', 'last_call'))
+    check('ledger adds up to the revenue (fractional values)', near(ledgerSum(s), s.total) and s.ledger[U.gold_standard].n > 0,
+      ledgerSum(s) .. ' vs ' .. s.total)
+    s = watchShift(straight(), rules('fools_gold', 'gold_standard', 'monopoly', 'minimalist'))
+    check('ledger adds up to the total (with a multiplier)', near(ledgerSum(s), s.total) and s.mult == 2, ledgerSum(s) .. ' vs ' .. s.total)
+
+    -- End of shift: one result per mod with a shiftEnd hook, fired or not.
+    s = watchShift(layout({ 'I> s> E<' }), rules('perfect_ratio'))
+    local res = s.results[1]
+    check('Perfect Ratio reports that it fired', #s.results == 1 and res.mod == U.perfect_ratio and res.fired and near(res.delta, s.base) and res.label == 'x2')
+    s = watchShift(layout({ 'I> s> p> E<' }), rules('perfect_ratio'))
+    res = s.results[1]
+    check('Perfect Ratio reports "not met"', #s.results == 1 and res.mod == U.perfect_ratio and not res.fired and s.ledger[U.perfect_ratio].n == 0)
+
+    -- On-board events are credited to whoever set the rule, at the tile.
+    check('rule fields remember who set them',
+      rules('leaky_splitter').owner.leakEvery == U.leaky_splitter and rules('overtime').owner.shiftLen == U.overtime)
+    s, log = watchShift(layout({ 'I> y> b> E<' }), rules('leaky_splitter'))
+    check('Leaky Splitter triggers at the splitter',
+      #log > 0 and #log == s.ledger[U.leaky_splitter].n and all(log, function(t) return t.what == 'dup' and t.x == 1 and t.y == 0 end), #log)
+    s, log = watchShift(layout({ 'K> g>', 'I> b> b> E<' }), rules('conveyor_oven'))
+    check('Conveyor Oven triggers on the belt by the generator',
+      #log > 0 and all(log, function(t) return t.mod == U.conveyor_oven and t.what == 'smelt' and t.x == 1 and t.y == 1 end), #log)
+    s, log = watchShift(layout({ 'K> p> E<' }), rules('pressure'))
+    check('Pressure triggers on each diamond craft',
+      #log >= s.sold.diamond.n and all(log, function(t) return t.mod == U.pressure and t.what == 'craft' and t.x == 1 end), #log)
+    s, log = watchShift(layout({ 'I> s> p> E<' }), rules('pressure'))
+    check('Pressure stays quiet on ordinary recipes', #log == 0 and s.total > 0, #log)
+    s, log = watchShift(layout({ 'I> o> o> E<' }), rules('double_polish'))
+    check('Mirror Finish triggers on the second polish only',
+      #log > 0 and all(log, function(t) return t.mod == U.double_polish and t.what == 'polish' and t.x == 2 end), #log)
+
+    -- Static modifiers mark the machines they change.
+    local function affecting(F, r, x, y)
+      local list = r:affecting(F, F:at(x, y)) or {}
+      return #list == 1 and list[1] or (#list == 0 and 'none' or 'many')
+    end
+    local pair = layout({ 'I> s> E<', '.. s> ..' })
+    local lone = layout({ 'I> s> E<' })
+    local chain = layout({ 'I> s> p> E<' })
+    check('Assembly Line marks adjacent twins, not a lone machine',
+      affecting(pair, rules('assembly_line'), 1, 0) == U.assembly_line and affecting(lone, rules('assembly_line'), 1, 0) == 'none')
+    check('Hand Crank marks a lone machine, not neighbours',
+      affecting(lone, rules('isolation'), 1, 0) == U.isolation and affecting(pair, rules('isolation'), 1, 0) == 'none')
+    check('Direct Drive marks the machine feeding another',
+      affecting(chain, rules('direct_drive'), 1, 0) == U.direct_drive and affecting(chain, rules('direct_drive'), 2, 0) == 'none')
+    s = watchShift(pair, rules('assembly_line'))
+    check('the ledger counts the machines a static modifier changes', s.ledger[U.assembly_line].n == 2, s.ledger[U.assembly_line].n)
+
+    -- Setup-only mods never trigger.
+    s, log = watchShift(straight(), Rules.new({ U.overtime, boss('narrow_dock'), boss('brownout'), boss('rockfall') }))
+    check('setup-only mods never trigger', #log == 0 and s.ledger[U.overtime].n == 0 and s.total > 0, #log)
   end
 
   print(string.format('%d passed, %d failed', passed, failed))
