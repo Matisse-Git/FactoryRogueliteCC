@@ -210,6 +210,73 @@ return function()
     check('half power halves output', n >= 6 and n <= 8, soldString(s))
   end
 
+  -- 10b. The remaining machines, built from ASCII layouts.
+  do
+    local layout = require 'tests.layout'
+    local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
+
+    local s = runShift(layout({ 'I> o> E<' }))
+    check('polisher doubles value (7 ore for $14)', count(s, 'iron_ore') == 7 and s.total == 14, soldString(s))
+
+    s = runShift(layout({ 'I> o> o> E<' }))
+    check('an item cannot be polished twice by default', s.total == 0, soldString(s))
+    s = runShift(layout({ 'I> o> o> E<' }), rules('double_polish'))
+    check('Mirror Finish allows a second polish (x4)', s.total > 0 and s.total == count(s, 'iron_ore') * 4, soldString(s))
+
+    s = runShift(layout({ 'I> c> E<' }))
+    check('crusher turns 1 ore into 2 dust', count(s, 'iron_dust') >= 54, soldString(s))
+
+    local noPower = { setup = function(r) r.basePower = 0 end }
+    s = runShift(layout({ 'I> s> E<' }), Rules.new({ noPower }))
+    check('no power, no ingots', s.total == 0, soldString(s))
+    s = runShift(layout({ 'K> g>', 'I> s> E<' }), Rules.new({ noPower }))
+    check('a coal generator powers the smelter', count(s, 'iron_ingot') >= 12, soldString(s))
+
+    s = runShift(layout({
+      'I> s> p> b> bv ..',
+      '.. .. .. .. a> E<',
+      'C> s> p> b> b^ ..',
+    }))
+    check('assembler builds motors from gear + wire', count(s, 'motor') >= 6 and s.total == count(s, 'motor') * 20, soldString(s))
+
+    s = runShift(layout({ 'K> p> E<' }), rules('pressure'))
+    check('Pressure: press makes diamonds from coal', count(s, 'diamond') >= 15, soldString(s))
+
+    local plain = runShift(layout({ 'I> y> b> E<' })).total
+    local leaky = runShift(layout({ 'I> y> b> E<' }), rules('leaky_splitter')).total
+    check('Leaky Splitter duplicates items', leaky > plain, plain .. ' -> ' .. leaky)
+
+    s = runShift(layout({ 'I> s> E<' }), rules('perfect_ratio'))
+    check('Perfect Ratio: saturated smelter doubles revenue', s.mult == 2, soldString(s))
+    s = runShift(layout({ 'I> s> p> E<' }), rules('perfect_ratio'))
+    check('Perfect Ratio: an idling press does not', s.mult == 1, soldString(s))
+
+    local full = layout({ 'I> b> b> E<' })
+    full.world:query('port')[1].port.period = 1
+    local wide = runShift(full).total
+    full = layout({ 'I> b> b> E<' })
+    full.world:query('port')[1].port.period = 1
+    local narrow = runShift(full, Rules.new({ { setup = function(r) r.exportPeriod = 2 end } })).total
+    check('Narrow Dock halves what the export takes', narrow <= wide / 2 + 1 and narrow > 0, wide .. ' -> ' .. narrow)
+
+    s = runShift(layout({ 'K> g>', 'I> b> b> E<' }), rules('conveyor_oven'))
+    check('Conveyor Oven smelts ore passing a generator', count(s, 'iron_ingot') > 0, soldString(s))
+  end
+
+  -- 10c. Boss rubble comes and goes with the contract.
+  do
+    local run = Run.new(5)
+    for _, b in ipairs(Contracts.bosses) do
+      if b.id == 'rockfall' then run.bosses[1] = b end
+    end
+    run.index = 2
+    run:advance()
+    check('Rockfall buries 8 tiles', #run.factory.world:query('rubble') == 8)
+    run:advance()
+    check('rubble is cleared for the next contract', #run.factory.world:query('rubble') == 0)
+    check('sector 2 adds a third port', #run.factory.world:query('port') == 3)
+  end
+
   -- 11. Runs are reproducible from the seed.
   do
     local function describe(seed)

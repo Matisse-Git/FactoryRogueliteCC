@@ -4,18 +4,20 @@
 local Contracts = {}
 
 -- Revenue quota per contract (summed over the contract's shifts).
-Contracts.quotas = { 120, 220, 340, 600, 900, 1300, 2000, 3000, 4500 }
+-- Untuned beyond the first sector: `lovec . --bench` prints reference numbers.
+Contracts.quotas = { 120, 220, 340, 550, 850, 1200, 1800, 2600, 3600 }
 
 Contracts.perSector = 3
 Contracts.shifts = 3        -- shifts per contract
 Contracts.shiftLen = 60     -- seconds (ticks) per shift
-Contracts.basePower = 10    -- watts supplied by the board itself
+Contracts.basePower = 16    -- watts supplied by the board itself (starter kit draws 9)
 
 -- Raw resources on the input ports of each sector.
 -- A nested list means "pick one of these with the run's seed".
+-- Coal arrives in sector 2 so generators are never a dead purchase.
 Contracts.sectorPorts = {
   { 'iron_ore', 'copper_ore' },
-  { 'iron_ore', 'copper_ore', { 'coal', 'gold_ore' } },
+  { 'iron_ore', 'copper_ore', 'coal' },
   { 'iron_ore', 'copper_ore', 'coal', 'gold_ore' },
 }
 

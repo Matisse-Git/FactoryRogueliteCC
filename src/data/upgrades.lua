@@ -15,7 +15,6 @@
 -- ctx = { type, form, mats, polished, dist, tick, len, value }
 -- sc  = { revenue, mult, notes, sold, kinds, perfect, unplaced }
 
-local Items = require 'src.data.items'
 local Recipes = require 'src.data.recipes'
 local D = require 'src.sim.dirs'
 
@@ -186,7 +185,7 @@ local list = {
     end,
   },
   {
-    id = 'double_polish', name = 'Mirror Finish', code = 'MF2', color = 'purple', cost = 6,
+    id = 'double_polish', name = 'Mirror Finish', code = 'MR', color = 'purple', cost = 6,
     desc = 'Items can be polished twice, doubling their value again.',
     setup = function(r) r.maxPolish = 2 end,
   },
@@ -209,8 +208,5 @@ local list = {
 
 local Upgrades = { list = list, byId = {}, INGOT_OF = INGOT_OF }
 for _, u in ipairs(list) do Upgrades.byId[u.id] = u end
-
--- Silence "unused" for Items; kept for people adding upgrades that need it.
-Upgrades.Items = Items
 
 return Upgrades

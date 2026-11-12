@@ -105,7 +105,9 @@ local function start(F, e, carry)
       if (m.inbuf[r.inputs[j][1]] or 0) < r.inputs[j][2] then ok = false; break end
     end
     if ok then
-      if #m.outq + r.outN <= math.max(2, r.outN) then
+      -- Room for one finished batch besides the one about to be made, so a
+      -- machine that emits 2 items per craft is not throttled by its exit.
+      if #m.outq + r.outN <= math.max(2, r.outN * 2) then
         for j = 1, #r.inputs do
           local t = r.inputs[j][1]
           m.inbuf[t] = m.inbuf[t] - r.inputs[j][2]
