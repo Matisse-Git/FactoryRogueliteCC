@@ -54,8 +54,8 @@ a smelter takes 4 s, a press 3 s, an assembler 6 s. The recipe book (Tab) has th
 | 1–9 | Select a piece from the kit |
 | Q / Esc | Deselect |
 | X | Clear the board |
-| Space / Enter | Run the shift; during a shift, Space pauses and Enter skips to the end |
-| 1 / 2 / 3 / 4 (during a shift) | Speed 1×, 2×, 4×, skip |
+| Space / Enter | Run the shift; during a shift, Space pauses |
+| 1 / 2 / 3 (during a shift) | Speed 1×, 2×, 4× |
 | Tab | Recipe book |
 | F11 | Fullscreen |
 

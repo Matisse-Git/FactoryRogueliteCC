@@ -160,8 +160,18 @@ return function(App)
     shot('04_run')
     App.g.paused = false
 
+    App.keypressed('return')
+    App.keypressed('4')
+    wait(1)
+    expect('a running shift cannot be skipped', App.g.mode == 'run')
     click(300, 170)
-    expect('SKIP finishes the shift', App.g.mode == 'summary')
+    expect('4X button sets the speed', App.g.speed == 4 and App.g.mode == 'run')
+    for _ = 1, 900 do
+      if App.g.mode ~= 'run' then break end
+      wait(1)
+    end
+    expect('the shift ends on its own', App.g.mode == 'summary')
+    App.g.speed = 1
     shot('05_summary')
     local earned = App.run.progress
     expect('shift earned revenue', earned > 0)
@@ -171,9 +181,10 @@ return function(App)
 
     App.run.progress = 9999          -- bank enough to clear the contract
     App.keypressed('space')
-    App.keypressed('return')
+    expect('keys: Space runs the shift', App.g.mode == 'run')
+    Game.fastForward(App)
     wait(1)
-    expect('keys: Space runs, Enter skips', App.g.mode == 'summary' and App.g.summary.status == 'cleared')
+    expect('banked revenue clears the contract', App.g.mode == 'summary' and App.g.summary.status == 'cleared')
     click(170, 157)
     expect('COLLECT opens the shop', App.state == 'shop' and App.run.credits > 4)
 
@@ -242,7 +253,7 @@ return function(App)
     wait(2)
     shot('11_run_late')
     App.g.paused = false
-    Game.skipShift(App)
+    Game.fastForward(App)
     wait(2)
     shot('12_summary_late')
 
@@ -254,7 +265,7 @@ return function(App)
       if App.g.mode == 'summary' then Game.afterSummary(App) end
       if App.g.mode == 'build' then
         Game.startShift(App)
-        Game.skipShift(App)
+        Game.fastForward(App)
       end
     end
     Game.afterSummary(App)

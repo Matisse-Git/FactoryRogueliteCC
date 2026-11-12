@@ -170,7 +170,9 @@ local function stepSim(app)
   if F:finished() then finishShift(app) end
 end
 
-local function skipShift(app)
+-- Runs the rest of the shift at once. Not bound to any input: players watch
+-- their shifts. Only the screenshot script uses it.
+local function fastForward(app)
   while app.g.mode == 'run' do stepSim(app) end
 end
 
@@ -476,11 +478,10 @@ local function drawSidebar(app)
     if UI.button('?', SX + 70, 164, 23, 13) then g.book = true end
   elseif g.mode == 'run' then
     for i, s in ipairs({ 1, 2, 4 }) do
-      if UI.button(s .. 'X', SX + 3 + (i - 1) * 21, 164, 19, 13, { active = g.speed == s and not g.paused, color = P.blue }) then
+      if UI.button(s .. 'X', SX + 3 + (i - 1) * 31, 164, 28, 13, { active = g.speed == s and not g.paused, color = P.blue }) then
         g.speed, g.paused = s, false
       end
     end
-    if UI.button('SKIP', SX + 66, 164, 27, 13) then skipShift(app) end
   end
 end
 
@@ -702,14 +703,13 @@ function Game.key(app, key)
     if key == 'space' then g.paused = not g.paused
     elseif key == '1' then g.speed, g.paused = 1, false
     elseif key == '2' then g.speed, g.paused = 2, false
-    elseif key == '3' then g.speed, g.paused = 4, false
-    elseif key == '4' or key == 'return' then skipShift(app) end
+    elseif key == '3' then g.speed, g.paused = 4, false end
   elseif g.mode == 'summary' then
     if key == 'space' or key == 'return' then afterSummary(app) end
   end
 end
 
 -- Exposed for the screenshot script.
-Game.startShift, Game.skipShift, Game.afterSummary, Game.placeAt = startShift, skipShift, afterSummary, placeAt
+Game.startShift, Game.fastForward, Game.afterSummary, Game.placeAt = startShift, fastForward, afterSummary, placeAt
 
 return Game
