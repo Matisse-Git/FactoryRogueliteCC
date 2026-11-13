@@ -43,6 +43,7 @@ local function target(F, x, y, d)
     if t.slot and d == (b.dir + 2) % 4 then return nil, nil end  -- output face
     return nil, t
   elseif t.export then
+    if t.export.closed[d] then return nil, nil end       -- a closed depot face
     return nil, t
   end
   return nil, nil

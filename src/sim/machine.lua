@@ -24,7 +24,7 @@ function M.reset(e)
   m.idle = 0          -- ticks spent not crafting after the first craft
   m.busy = 0          -- ticks spent crafting (see Factory:utilisation)
   m.started = false
-  m.status = 'idle'   -- 'work' | 'idle' | 'blocked'
+  m.status = 'idle'   -- 'work' | 'idle' | 'blocked' | 'off'
   m.speed = 1
   m.draw = m.def.draw or 0
 end
@@ -186,6 +186,12 @@ function M.update(F, e)
       end
     end
     m.status = m.burn > 0 and 'work' or 'idle'
+    return
+  end
+
+  -- A machine with no power (a boss cut its plot off) does nothing at all.
+  if m.speed <= 0 then
+    m.status = 'off'
     return
   end
 

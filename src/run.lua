@@ -13,6 +13,7 @@ local Machines = require 'src.data.machines'
 local Upgrades = require 'src.data.upgrades'
 local Investments = require 'src.data.investments'
 local Alternates = require 'src.data.alternates'
+local Bosses = require 'src.data.bosses'
 local Contracts = require 'src.data.contracts'
 
 local Run = {}
@@ -45,12 +46,15 @@ function Run.new(seed)
   })
   r.map:annex(start, r.layoutRng:int(1, 2), 1, r.factory)
 
-  -- One boss per sector, fixed by the seed.
-  local pool = {}
-  for i, b in ipairs(Contracts.bosses) do pool[i] = b end
-  Rng.new(seed * 3 + 11):shuffle(pool)
-  r.bosses = {}
-  for s = 1, math.ceil(#Contracts.quotas / Contracts.perSector) do r.bosses[s] = pool[s] end
+  -- The order bosses are tried in, fixed by the seed: one per sector, the
+  -- last sector's from the final pool. Each picks its target when revealed.
+  r.bossRng = Rng.new(seed * 3 + 11)
+  r.bossOrder, r.finalOrder = {}, {}
+  for i, def in ipairs(Bosses.pool(false)) do r.bossOrder[i] = def.id end
+  for i, def in ipairs(Bosses.pool(true)) do r.finalOrder[i] = def.id end
+  r.bossRng:shuffle(r.bossOrder)
+  r.bossRng:shuffle(r.finalOrder)
+  r.bosses = {}              -- sector -> boss mod, once revealed
 
   -- The first contract has no choice: a market the starting kit can fill.
   r.market = Market.roll(r.marketRng, {
@@ -70,9 +74,59 @@ function Run:contract(index)
   return {
     index = index, sector = sector, isBoss = isBoss,
     boss = isBoss and self.bosses[sector] or nil,
+    -- The boss of this sector, known from its first contract on.
+    sectorBoss = self.bosses[sector], bossIn = (per - index % per) % per,
     quota = Contracts.quota(index),
     newSector = index % per == 1,
   }
+end
+
+---------------------------------------------------------------- bosses
+
+-- Announce the boss of a sector: take the next definition in the seed's
+-- order that makes sense on this site, and let it pick its target.
+function Run:revealBoss(sector)
+  if self.bosses[sector] then return self.bosses[sector] end
+  local sectors = math.ceil(self:total() / Contracts.perSector)
+  local order
+  if sector == sectors then
+    order = self.finalOrder
+  elseif sector < sectors then
+    order = self.bossOrder
+  else
+    -- Endless mode: any boss.
+    order = {}
+    for _, id in ipairs(self.bossOrder) do order[#order + 1] = id end
+    for _, id in ipairs(self.finalOrder) do order[#order + 1] = id end
+  end
+  local used = {}
+  for _, boss in pairs(self.bosses) do used[boss.id] = true end
+  local start = sector > sectors and self.bossRng:int(1, #order) or 1
+  for pass = 1, 2 do
+    for k = 0, #order - 1 do
+      local def = Bosses.byId[order[(start + k - 1) % #order + 1]]
+      -- First pass: one not seen this run. Second pass: anything that fits.
+      if pass == 2 or not used[def.id] then
+        local params = {}
+        if def.pick then params = def.pick(self, self.bossRng) end
+        if params then
+          self.bosses[sector] = Bosses.make(def, params)
+          return self.bosses[sector]
+        end
+      end
+    end
+  end
+end
+
+-- Close every other face of the depot for this contract.
+function Run:closeFaces()
+  for i, f in ipairs(self.map:depotFaces()) do
+    if i % 2 == 0 then self.factory:at(f[1], f[2]).export.closed[f[3]] = true end
+  end
+end
+
+function Run:openFaces()
+  for _, e in ipairs(self.factory.world:query('export')) do e.export.closed = {} end
 end
 
 -- Watts the site supplies before any mod: the grid, what was invested in
@@ -174,9 +228,12 @@ function Run:startContract()
   self.progress = 0
   self.shiftsUsed = 0
   self.soldValue = {}
-  local c = self:contract()
   self:clearRubble()
-  if c.boss and c.boss.rubble then self:placeRubble(c.boss.rubble) end
+  self:openFaces()
+  -- The sector's boss is known from its first contract.
+  self:revealBoss(math.ceil(self.index / Contracts.perSector))
+  local c = self:contract()
+  if c.boss and c.boss.def.prepare then c.boss.def.prepare(self, c.boss.params) end
   self:refreshRules()
 end
 
@@ -291,6 +348,67 @@ function Run:payout()
   self.credits = self.credits + p.total
   self.lastPayout = p
   return p
+end
+
+-- Beating a boss: a pick of one from three blueprints (alternate recipes
+-- fill the gaps once blueprints run out; credits if there is nothing left).
+function Run:rollReward()
+  local rng = self.shopRng
+  local pool = {}
+  for _, kind in ipairs(Machines.list) do
+    local def = Machines[kind]
+    if def.cost and not self.blueprints[kind] and (not def.needs or self.blueprints[def.needs]) then
+      pool[#pool + 1] = { { type = 'blueprint', id = kind }, def.weight or 1 }
+    end
+  end
+  local options = {}
+  while #options < 3 and #pool > 0 do
+    local pick = rng:weighted(pool)
+    for i, entry in ipairs(pool) do
+      if entry[1] == pick then table.remove(pool, i); break end
+    end
+    options[#options + 1] = pick
+  end
+  local alts = {}
+  for _, alt in ipairs(Alternates.list) do
+    if not self:hasRecipe(alt.id) and self:unlocked(alt.kind) then alts[#alts + 1] = alt end
+  end
+  rng:shuffle(alts)
+  for _, alt in ipairs(alts) do
+    if #options >= 3 then break end
+    options[#options + 1] = { type = 'recipe', id = alt.id }
+  end
+  if #options == 0 then
+    self.credits = self.credits + Contracts.reward.noBlueprint
+    self.reward = nil
+    return nil
+  end
+  self.reward = { options = options }
+  return self.reward
+end
+
+function Run:takeReward(i)
+  local o = self.reward and self.reward.options[i]
+  if not o then return false end
+  if o.type == 'blueprint' then
+    self.blueprints[o.id] = true
+  else
+    self.recipes[#self.recipes + 1] = o.id
+  end
+  self.reward = nil
+  self:refreshRules()
+  return true
+end
+
+-- What follows a cleared and paid contract: a boss reward if it was a boss,
+-- then the next two offers. (The game shows the win screen first after the
+-- last contract; going on from there is endless mode.)
+function Run:afterContract()
+  if self.index >= self:total() then self.won = true end
+  if self:contract().isBoss then self:rollReward() end
+  -- The next sector's boss is announced with its first contract's offers.
+  self:revealBoss(math.ceil((self.index + 1) / Contracts.perSector))
+  self:rollOffers()
 end
 
 -- Move on to the chosen contract, after the shop. Its land still has to be

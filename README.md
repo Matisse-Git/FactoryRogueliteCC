@@ -168,7 +168,10 @@ a choice between two contracts before every shop, and credits for beating the
 quota by 2x, 4x and 8x; a shop of one blueprint or alternate recipe, two modules
 (40 in three rarities, 5 slots, SELL under each, buying a sixth asks which one
 it replaces) and three investments (power, port rates, machine speeds, value
-per raw material, each bought a level at a time).
+per raw material, each bought a level at a time); 12 bosses plus 3 for the last
+contract, each announced three contracts ahead and aimed at the standing factory
+(a plot loses power, a resource runs dry, depot faces close...), a free pick of
+one from three blueprints after each, and endless mode after contract 12.
 The quota curve is a first pass, and the rest of this file still
 describes the single-board prototype in places. No audio, no saved runs. Art is
 placeholder.

@@ -17,6 +17,7 @@ return function(App)
   local Crt = require 'src.gfx.crt'
   local Contracts = require 'src.data.contracts'
   local Upgrades = require 'src.data.upgrades'
+  local Bosses = require 'src.data.bosses'
   local U = Upgrades.byId
   local out = love.graphics.newCanvas(960, 540)
   out:setFilter('nearest', 'nearest')
@@ -441,8 +442,13 @@ return function(App)
     wait(2)
     shot('08b_two_plots')
     App.wheelmoved(0, 1)
+    local c2 = App.run:contract()
+    expect('boss: announced ahead, in the top bar', c2.boss == nil and c2.sectorBoss ~= nil and c2.bossIn == 1)
 
     ---------------------------------------------------------- later screens
+    -- A boss that cuts off the plot the run started on.
+    local hx, hy = Map.slotOf(ox, oy)
+    App.run.bosses[1] = Bosses.make(Bosses.byId.blackout, { plots = { { hx, hy } } })
     App.run.index = 2
     App.run:advance()
     Game.enter(App)
@@ -450,6 +456,24 @@ return function(App)
     wait(2)
     expect('a boss contract announces its twist', App.g.mode == 'intro' and App.run:contract().boss ~= nil)
     shot('08_boss_intro')
+    click(Game.at.intro)
+    Game.setZoom(App.g, 8, 0, 0)
+    Game.startShift(App)
+    App.g.acc = 10.5
+    wait(2)
+    App.g.paused = true
+    local off = 0
+    for _, e in ipairs(f.world:query('machine')) do
+      if e.machine.status == 'off' then off = off + 1 end
+    end
+    expect('boss: Blackout stops the machines on the marked plot', off > 0)
+    App.move(300, 120)
+    wait(2)
+    shot('08c_blackout')
+    App.g.paused = false
+    Game.fastForward(App)
+    App.g.summary.status = 'next'
+    Game.afterSummary(App)
 
     App.g.mode = 'build'
     App.keypressed('tab')
@@ -545,9 +569,7 @@ return function(App)
     expect('reveal: the second click moves on', App.g.mode == 'build')
 
     -- A boss twist that bites shakes the boss label.
-    for _, b in ipairs(Contracts.bosses) do
-      if b.id == 'tariff' then App.run.bosses[3] = b end
-    end
+    App.run.bosses[3] = Bosses.make(Bosses.byId.tariff, { mat = 'copper' })
     App.run.index = 8
     App.run:advance()
     Game.enter(App)
@@ -569,6 +591,41 @@ return function(App)
     expect('boss: Tariff triggers on a copper sale', bitten)
     shot('18_boss_trigger')
     Game.fastForward(App)
+
+    -- Win the run, then keep going.
+    App.g.summary.status = 'next'
+    Game.afterSummary(App)
+    App.run.index = 12
+    App.run:startContract()
+    Game.enter(App)
+    App.g.mode = 'build'
+    App.run.progress = App.run:contract().quota
+    Game.startShift(App)
+    Game.fastForward(App)
+    wait(1)
+    click(Game.at.summary)
+    expect('clearing contract 12 wins the run', App.g.mode == 'win' and App.run.won)
+    App.move(300, 120)
+    wait(2)
+    shot('13a_win')
+    click(Game.at.keepGoing)
+    expect('KEEP GOING: endless mode, and the boss reward first',
+      App.state == 'board' and App.run.endless and App.run.reward ~= nil)
+    App.move(300, 170)
+    wait(2)
+    shot('13b_boss_reward')
+    local nopts = #App.run.reward.options
+    local first = App.run.reward.options[1]
+    click(Board.rewardAt(1, nopts))
+    expect('reward: TAKE unlocks it and shows the next contracts',
+      App.run.reward == nil and #App.run.offers == 2 and (App.run:unlocked(first.id) or App.run:hasRecipe(first.id)))
+    click(Board.at(1))
+    click(Shop.at.next)
+    expect('endless: on to contract 13', App.state == 'game' and App.run.index == 13)
+    takeLand()
+    wait(2)
+    shot('13c_endless_intro')
+    click(Game.at.intro)
 
     -- Lose on purpose: burn the remaining shifts with an empty board.
     clearBoard()

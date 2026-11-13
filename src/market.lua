@@ -157,7 +157,7 @@ function Market.mod(market)
   local mod = { id = 'market', name = 'Market', color = 'green', market = market }
   function mod.value(s, ctx)
     for _, d in ipairs(market.demand) do
-      if d.item == ctx.type then
+      if d.item == ctx.type and not ctx.rules.noDemand then
         s.market = s.market or {}
         local rules = ctx.rules
         local used = s.market[d.item] or 0

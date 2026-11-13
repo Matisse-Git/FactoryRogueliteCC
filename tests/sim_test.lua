@@ -333,15 +333,14 @@ return function()
 
   -- 10c. Boss rubble comes and goes with the contract, on owned land only.
   do
+    local Bosses = require 'src.data.bosses'
     local run = Run.new(5)
-    for _, b in ipairs(Contracts.bosses) do
-      if b.id == 'rockfall' then run.bosses[1] = b end
-    end
+    run.bosses[1] = Bosses.make(Bosses.byId.rockfall)
     run.index = 2
     run:advance()
     local rubble, onLand = run.factory.world:query('rubble'), true
     for _, e in ipairs(rubble) do onLand = onLand and run.map:owned(e.pos.x, e.pos.y) end
-    check('Rockfall buries 8 tiles of your land', #rubble == 8 and onLand, #rubble)
+    check('Rockfall buries 10 tiles of your land', #rubble == 10 and onLand, #rubble)
     run:advance()
     check('rubble is cleared for the next contract', #run.factory.world:query('rubble') == 0)
   end
@@ -652,6 +651,139 @@ return function()
     check('1.9x pays nothing extra', run:payout().overshoot == 0)
   end
 
+  -- 10i. Bosses, their reward, and endless mode.
+  do
+    local Bosses = require 'src.data.bosses'
+    local Market = require 'src.market'
+    local Map = require 'src.map'
+    local layout = require 'tests.layout'
+    local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
+    local function near(a, b) return math.abs(a - b) < 1e-6 end
+    local function boss(id, params) return Bosses.make(Bosses.byId[id], params) end
+    local function straight(item)
+      local F = Factory.new()
+      F:place('port', 0, 2, 0, { item = item })
+      belts(F, 1, 5, 2)
+      F:place('export', 6, 2, 2)
+      return F
+    end
+
+    local regular, final = Bosses.pool(false), Bosses.pool(true)
+    check('12 bosses and 3 for the last contract', #regular == 12 and #final == 3)
+
+    -- Announced three contracts ahead.
+    local run = Run.new(31)
+    local c = run:contract()
+    check('the first boss is known from contract 1', c.sectorBoss ~= nil and c.boss == nil and c.bossIn == 2
+      and run:contract(3).boss == c.sectorBoss and type(c.sectorBoss.desc) == 'string')
+    local rng = require('src.rng').new(4)
+    check('a boss that needs room does not come to a one-plot site',
+      Bosses.byId.blackout.pick(run, rng) == nil and Bosses.byId.drought.pick(run, rng) == nil
+      and Bosses.byId.foreclosure.pick(run, rng) == nil)
+    check('its target is picked from what the site has',
+      run.blueprints[Bosses.byId.strike.pick(run, rng).kind] == true
+      and ({ iron = true, copper = true })[Bosses.byId.tariff.pick(run, rng).mat] == true)
+    check('the last sector draws from the final pool',
+      run:revealBoss(2) ~= nil and run:revealBoss(3) ~= nil and run:revealBoss(4).def.final == true)
+    local seen, distinct = {}, true
+    for sector = 1, 4 do
+      if seen[run.bosses[sector].id] then distinct = false end
+      seen[run.bosses[sector].id] = true
+    end
+    check('a run sees four different bosses', distinct)
+
+    -- What each does.
+    local F = layout({ 'I> s> E<' })
+    local dark = boss('blackout', { plots = { { 0, 0 } } })
+    local r = Rules.new({ dark }, { basePower = 16 })
+    local s = runShift(F, r)
+    check('Blackout: machines on the marked plot do not run, and draw nothing',
+      s.total == 0 and F:at(1, 0).machine.status == 'off' and F:plannedDraw(r) == 0 and r:affecting(F, F:at(1, 0)) ~= nil)
+    F = Factory.new()
+    F:place('port', 8, 0, 0, { item = 'iron_ore' })
+    F:place('smelter', 9, 0, 0)
+    F:place('export', 10, 0, 2)
+    s = runShift(F, Rules.new({ dark }))
+    check('and the plot next door is fine', count(s, 'iron_ingot') == 15, soldString(s))
+
+    s = runShift(straight('iron_ore'), Rules.new({ boss('drought', { item = 'iron_ore' }) }))
+    check('Drought: the port supplies nothing', s.total == 0, soldString(s))
+    s = runShift(layout({ 'I> s> E<' }), Rules.new({ boss('strike', { kind = 'smelter' }) }))
+    check('Strike: the smelter makes half (7 or 8 ingots)', count(s, 'iron_ingot') >= 7 and count(s, 'iron_ingot') <= 8, soldString(s))
+    local market = Market.mod({ demand = { { item = 'gear', mult = 3, units = 10 } } })
+    s = runShift(straight('gear'), Rules.new({ market, boss('glut') }))
+    check('Glut: demand pays nothing extra', s.total == 240, soldString(s))
+    F = layout({ 'I> s> E<' })
+    runShift(F, Rules.new({ boss('surge') }))
+    check('Surge Pricing: machines draw 50% more', F:at(1, 0).machine.draw == 4.5)
+    s = runShift(straight('gear'), Rules.new({ boss('long_haul') }))
+    check('Long Haul: 5 tiles of belt cost 15%', near(s.exact, 240 * 0.85), s.exact)
+    s = runShift(layout({ 'I> s> E<' }), Rules.new({ boss('inspection') }))
+    check('Inspection: ingots are worthless', s.total == 0 and count(s, 'iron_ingot') == 15, soldString(s))
+    s = runShift(straight('gear'), Rules.new({ boss('inspection') }))
+    check('but gears are not', s.total == 240, soldString(s))
+    s = runShift(straight('gear'), Rules.new({ boss('saturation') }))
+    check('Saturation: each gear sold makes the next worth 1% less', near(s.exact, 8 * (30 - 4.35)), s.exact)
+    r = Rules.new({ boss('gridlock') }, { basePower = 16 })
+    F = layout({ 'I> s> E<' })
+    runShift(F, r)
+    check('Gridlock: half the power, 25% more draw', r.basePower == 8 and F:at(1, 0).machine.draw == 3.75)
+    r = Rules.new({ boss('rush') })
+    check('Rush Order: 40 second shifts', r.shiftLen == 40)
+    F = straight('gear')
+    F:at(6, 2).export.closed[0] = true
+    s = runShift(F)
+    check('a closed depot face takes nothing', s.total == 0, soldString(s))
+
+    -- On the board.
+    run = Run.new(31)
+    run.bosses[1] = boss('narrow_dock')
+    run.index = 2
+    run:advance()
+    local closed = 0
+    for _, e in ipairs(run.factory.world:query('export')) do
+      for d = 0, 3 do closed = closed + (e.export.closed[d] and 1 or 0) end
+    end
+    check('Narrow Dock closes 4 of the 8 faces', closed == 4, closed)
+    run:advance()
+    closed = 0
+    for _, e in ipairs(run.factory.world:query('export')) do
+      for d = 0, 3 do closed = closed + (e.export.closed[d] and 1 or 0) end
+    end
+    check('and they open again for the next contract', closed == 0 and run:contract().sectorBoss ~= nil and run.index == 4)
+
+    -- Beating a boss: one of three blueprints.
+    run = Run.new(31)
+    run.index = 3
+    run:afterContract()
+    local options = run.reward and run.reward.options
+    local fresh = options ~= nil and #options == 3
+    for _, o in ipairs(options or {}) do
+      fresh = fresh and o.type == 'blueprint' and not run.blueprints[o.id] and o.id ~= 'manufacturer'
+    end
+    check('a boss win offers 3 blueprints you do not have', fresh)
+    check('and the next contracts, and the next boss', #run.offers == 2 and run.bosses[2] ~= nil)
+    local want = options[2].id
+    check('taking one unlocks it', run:takeReward(2) and run:unlocked(want) and run.reward == nil and not run:takeReward(1))
+    run.index = 2
+    run.reward = nil
+    run:afterContract()
+    check('an ordinary contract gives no such reward', run.reward == nil)
+
+    -- Endless mode.
+    run = Run.new(31)
+    run.index = 12
+    run:afterContract()
+    check('clearing contract 12 wins the run and still offers a 13th',
+      run.won and #run.offers == 2 and run:contract(13).quota == 13000000)
+    run:choose(1)
+    run:advance()
+    check('endless contracts keep their bosses', run.index == 13 and run:contract().sectorBoss ~= nil
+      and run:contract(15).isBoss and run:contract(15).sector == 5)
+    check('and their demand keeps growing', Market.units('gear', 5) == 108 and Market.units('gear', 6) == 162,
+      Market.units('gear', 5))
+  end
+
   -- 10f. Booster pads and premium faces in the simulation.
   do
     local layout = require 'tests.layout'
@@ -698,7 +830,8 @@ return function()
       run:unlocked('smelter') and run:unlocked('press') and not run:unlocked('assembler'))
     check('logistics need no blueprint', run:unlocked('belt') and run:unlocked('splitter') and run:unlocked('bridge'))
     check('fixed pieces cannot be built', not run:unlocked('port') and not run:unlocked('export'))
-    check('a run is 12 contracts', run:total() == 12 and #run.bosses == 4)
+    check('a run is 12 contracts, with a boss order fixed by the seed',
+      run:total() == 12 and #run.bossOrder == 12 and #run.finalOrder == 3)
   end
 
   -- 12b. The shop: one blueprint or recipe, two modules, three investments.
@@ -926,10 +1059,9 @@ return function()
       return F
     end
     local function near(a, b) return math.abs(a - b) < 1e-6 end
-    local function boss(id)
-      for _, b in ipairs(Contracts.bosses) do
-        if b.id == id then return b end
-      end
+    local Bosses = require 'src.data.bosses'
+    local function boss(id, params)
+      return Bosses.make(Bosses.byId[id], params)
     end
     -- plain value + everything credited to a mod
     local function ledgerSum(s)
@@ -970,10 +1102,10 @@ return function()
       #log == 30 and all(log, function(t) return t.delta < 0 end) and s.total == 0 and near(s.ledger[U.embargo].delta, -30), s.total)
     s, log = watchShift(straight(), rules('embargo'))
     check('Embargo on iron registers as a gain', #log == 30 and all(log, function(t) return t.delta > 0 end) and s.total == 90, s.total)
-    local tariff = boss('tariff')
+    local tariff = boss('tariff', { mat = 'copper' })
     s, log = watchShift(straight('copper_ore'), Rules.new({ tariff }))
     check('Tariff is credited to the boss, and is harmful',
-      #log == 30 and all(log, function(t) return t.mod == tariff and t.delta < 0 end) and near(s.ledger[tariff].delta, -30), #log)
+      #log == 30 and all(log, function(t) return t.mod == tariff and t.delta < 0 end) and near(s.ledger[tariff].delta, -15), #log)
     s, log = watchShift(straight('copper_ore'), Rules.new({ U.embargo, tariff }))
     check('a sale already worth $0 triggers nothing further', s.ledger[tariff].n == 0 and s.ledger[U.embargo].n == 30, s.ledger[tariff].n)
 

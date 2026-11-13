@@ -161,7 +161,8 @@ function Factory:place(kind, x, y, dir, extra)
     e.slot = Transfer.newSlot(e, 'port')
   elseif kind == 'export' then
     -- premium[d]: price multiplier for items entering while travelling d.
-    e.export = { cd = 0, taken = 0, sold = 0, log = {}, premium = {} }
+    -- closed[d]: that face takes nothing this contract.
+    e.export = { cd = 0, taken = 0, sold = 0, log = {}, premium = {}, closed = {} }
   elseif kind == 'rubble' then
     e.rubble = true
   elseif kind == 'rock' then
@@ -216,7 +217,7 @@ function Factory:plannedDraw(rules)
   local machines = self.world:query('machine')
   for i = 1, #machines do
     local e = machines[i]
-    if not e.machine.def.generator then
+    if not e.machine.def.generator and rules:speed(self, e) > 0 then
       total = total + rules:draw(self, e, e.machine.def.draw or 0)
     end
   end

@@ -142,7 +142,7 @@ end
 -- All investments show as one row of the ledger.
 local INVESTED = { name = 'Investments', color = 'green' }
 
-local STATUS = { work = 'WORKING', idle = 'WAITING FOR INPUT', blocked = 'OUTPUT BLOCKED' }
+local STATUS = { work = 'WORKING', idle = 'WAITING FOR INPUT', blocked = 'OUTPUT BLOCKED', off = 'NO POWER HERE' }
 
 local function entityTip(app, e)
   local g, F = app.g, app.run.factory
@@ -403,17 +403,23 @@ local function afterSummary(app)
     g.mode = 'build'
   elseif status == 'cleared' then
     run:payout()
-    if run.index >= run:total() then
+    if run.index == run:total() then
+      -- The last contract: the run is won. Going on from here is endless mode.
       run.won = true
       g.mode = 'win'
     else
-      -- Choose the next contract first, then shop for it.
-      run:rollOffers()
-      app.state = 'board'
+      Game.goOn(app)
     end
   else
     g.mode = 'over'
   end
+end
+
+-- After a cleared contract: a boss reward if it was a boss, then the choice
+-- of the next contract, then the shop.
+function Game.goOn(app)
+  app.run:afterContract()
+  app.state = 'board'
 end
 
 function Game.update(app, dt)
@@ -472,7 +478,7 @@ local function nub(x, y, dir, c, a, T)
   end
 end
 
-local STATUS_COLOR = { work = P.green, idle = P.faint, blocked = P.yellow }
+local STATUS_COLOR = { work = P.green, idle = P.faint, blocked = P.yellow, off = P.red }
 
 -- A belt takes its shape from what feeds it: a lone side feed makes a
 -- rounded corner, any other side feed opens the rail on that side.
@@ -513,9 +519,11 @@ local function drawBuilding(S, T, e, x, y, live)
     end
   end
   if e.export then
-    -- A premium face: gold on the edge the items come in through.
+    -- A premium face: gold on the edge the items come in through. A face a
+    -- boss closed: red.
     for d = 0, 3 do
-      if e.export.premium[d] then nub(x, y, (d + 2) % 4, P.gold, 1, T) end
+      if e.export.closed[d] then nub(x, y, (d + 2) % 4, P.red, 1, T)
+      elseif e.export.premium[d] then nub(x, y, (d + 2) % 4, P.gold, 1, T) end
     end
   elseif e.machine and live then
     local m = e.machine
@@ -587,6 +595,19 @@ local function drawBoard(app)
         if not map:has(sx, sy + 1) then UI.rect(px - 1, py + h - 1, w + 1, 1, P.line) end
       end
     end
+  end
+
+  -- Plots the sector's boss will cut off (or has): hatched in red, from the
+  -- moment the boss is announced.
+  local sectorBoss = run:contract().sectorBoss
+  for _, p in ipairs(sectorBoss and sectorBoss.params.plots or {}) do
+    local px, py = tilePos(g, p[1] * Map.PW, p[2] * Map.PH)
+    local w, h = Map.PW * T, Map.PH * T
+    UI.color(P.red, 0.25)
+    for k = -h, w, T do
+      love.graphics.line(px + max(k, 0), py + max(-k, 0), px + min(k + h, w), py + min(w - k, h))
+    end
+    UI.frame(px, py, w - 1, h - 1, P.red, 0.8)
   end
 
   local beltFrame = 1
@@ -728,6 +749,13 @@ local function drawBoard(app)
     local e = F:at(cx, cy)
     if e then
       UI.tip = entityTip(app, e)
+      if e.export then
+        for d = 0, 3 do
+          if e.export.closed[d] then
+            UI.tip.lines[#UI.tip.lines + 1] = 'CLOSED THIS CONTRACT: NOTHING GETS IN HEADING ' .. D.NAME[d] .. '.'
+          end
+        end
+      end
     elseif not map:owned(cx, cy) then
       UI.tip = { title = 'NOT YOUR LAND', color = P.faint, lines = { 'EVERY CONTRACT ADDS A PLOT.' } }
     elseif F:floorAt(cx, cy) == 'pad' then
@@ -779,8 +807,18 @@ local function drawTopBar(app)
   UI.rect(0, 0, 320, VY, P.panel)
   UI.rect(0, VY - 1, 320, 1, P.line)
 
-  local label = 'CONTRACT ' .. c.index .. '/' .. run:total()
+  local label = 'CONTRACT ' .. c.index .. (c.index <= run:total() and ('/' .. run:total()) or ' ENDLESS')
   UI.text(label, 3, 2, P.text)
+  if not c.boss and c.sectorBoss then
+    -- The boss this sector is heading for, so it can be prepared for.
+    local boss = c.sectorBoss
+    local text, bx = 'BOSS IN ' .. c.bossIn .. ': ' .. boss.name, 3 + Font.width(label) + 8
+    UI.text(text, bx, 2, P.redD)
+    if UI.inside(bx, 0, Font.width(text), 8) then
+      UI.tip = { title = boss.name, color = P.red, lines = { boss.desc,
+        'IN ' .. c.bossIn .. (c.bossIn == 1 and ' CONTRACT.' or ' CONTRACTS.') } }
+    end
+  end
   if c.boss then
     -- The boss has no card: its label takes the hit when its twist bites.
     local text, bx = 'BOSS: ' .. c.boss.name, 3 + Font.width(label) + 8
@@ -1115,7 +1153,7 @@ local function drawIntro(app)
   local x, y = floor(CX - w / 2), 22
   local cx = x + w / 2
   UI.panel(x, y, w, h, P.panel, c.boss and P.red or P.line)
-  UI.textCenter('CONTRACT ' .. c.index .. (c.index <= run:total() and (' OF ' .. run:total()) or ''), cx, y + 5, P.dim)
+  UI.textCenter('CONTRACT ' .. c.index .. (c.index <= run:total() and (' OF ' .. run:total()) or ' (ENDLESS)'), cx, y + 5, P.dim)
   UI.textCenter('QUOTA ' .. Fmt.money(c.quota), cx, y + 13, P.gold, 2)
   UI.textCenter(rules.shifts .. ' SHIFTS OF ' .. rules.shiftLen .. ' SECONDS', cx, y + 27, P.text)
   local yy = y + 37
@@ -1226,18 +1264,30 @@ end
 local function drawEnd(app, won)
   local run = app.run
   dim()
-  local w, h = 180, 84
-  local x, y = floor(CX - w / 2), 46
+  local w, h = 190, 90
+  local x, y = floor(CX - w / 2), 43
   local cx = x + w / 2
   UI.panel(x, y, w, h, P.panel, won and P.gold or P.red)
   if won then
     UI.textCenter('ALL QUOTAS MET', cx, y + 10, P.gold, 2)
     UI.textCenter('THE FACTORY IS YOURS.', cx, y + 28, P.text)
-  else
-    UI.textCenter('RUN OVER', cx, y + 10, P.red, 2)
-    UI.textCenter('STOPPED AT CONTRACT ' .. run.index .. ' OF ' .. run:total(), cx, y + 28, P.text)
-    UI.textCenter(Fmt.money(run.progress) .. ' OF ' .. Fmt.money(run:contract().quota), cx, y + 37, P.dim)
+    UI.textCenter('KEEP GOING AND THE QUOTAS KEEP GROWING,', cx, y + 39, P.dim)
+    UI.textCenter('ON THE LAND YOU HAVE, UNTIL ONE IS MISSED.', cx, y + 46, P.dim)
+    UI.textCenter('SEED ' .. run.seed, cx, y + 57, P.faint)
+    if UI.button('KEEP GOING', cx - 74, y + h - 19, 70, 13, { color = P.green }) then
+      run.endless = true
+      Game.goOn(app)
+    end
+    if UI.button('TITLE', cx + 4, y + h - 19, 70, 13) then app.toTitle() end
+    return
   end
+  UI.textCenter('RUN OVER', cx, y + 10, P.red, 2)
+  if run.endless then
+    UI.textCenter('ENDLESS: REACHED CONTRACT ' .. run.index, cx, y + 28, P.text)
+  else
+    UI.textCenter('STOPPED AT CONTRACT ' .. run.index .. ' OF ' .. run:total(), cx, y + 28, P.text)
+  end
+  UI.textCenter(Fmt.money(run.progress) .. ' OF ' .. Fmt.money(run:contract().quota), cx, y + 37, P.dim)
   UI.textCenter('SEED ' .. run.seed, cx, y + 48, P.faint)
   if UI.button('TITLE', cx - 30, y + h - 19, 60, 13, { color = P.green }) then app.toTitle() end
 end
@@ -1460,7 +1510,8 @@ Game.at = {
   menu = { 304, 4 },
   intro = { CX, 143 },          -- START
   summary = { CX + 57, 146 },   -- NEXT SHIFT / COLLECT / END RUN
-  finish = { CX, 118 },         -- TITLE on the end screen
+  finish = { CX, 121 },         -- TITLE on the end screen
+  keepGoing = { CX - 39, 121 }, -- KEEP GOING on the win screen
 }
 
 Game.startShift, Game.fastForward, Game.afterSummary, Game.placeAt = startShift, fastForward, afterSummary, placeAt

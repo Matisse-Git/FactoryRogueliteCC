@@ -1,5 +1,5 @@
--- Run structure: sectors of 3 contracts. Every third contract is a boss.
--- Boss twists use the same hooks as upgrades (see src/data/upgrades.lua).
+-- Run structure: sectors of 3 contracts. Every third contract is a boss
+-- (see src/data/bosses.lua).
 
 local Contracts = {}
 
@@ -45,6 +45,7 @@ Contracts.reward = {
   normal = 5, boss = 8, perUnusedShift = 2, interestPer = 5, interestCap = 5,
   overshoot = { { 2, 2 }, { 4, 2 }, { 8, 2 } },     -- { times the quota, credits }
   perStretch = 2,     -- a contract whose demand needs a machine you lack pays this much more
+  noBlueprint = 5,    -- beating a boss with nothing left to unlock pays this instead
 }
 Contracts.startCredits = 4
 Contracts.startBlueprints = { 'smelter', 'press' }
@@ -57,40 +58,6 @@ Contracts.premium = {
   value = function(s, ctx)
     if ctx.premium then ctx.value = ctx.value * ctx.premium end
   end,
-}
-
-Contracts.bosses = {
-  {
-    id = 'tariff', name = 'Tariff',
-    desc = 'Items containing copper sell for $0.',
-    value = function(s, ctx) if ctx.mats.copper then ctx.value = 0 end end,
-  },
-  {
-    id = 'brownout', name = 'Brownout',
-    desc = 'Base power is halved.',
-    setup = function(r) r.basePower = math.floor(r.basePower / 2) end,
-  },
-  {
-    id = 'rockfall', name = 'Rockfall', rubble = 8,
-    desc = '8 tiles are buried under rubble.',
-  },
-  {
-    id = 'narrow_dock', name = 'Narrow Dock',
-    desc = 'Each depot tile accepts only 1 item every 2 seconds.',
-    setup = function(r) r.exportPeriod = 2 end,
-  },
-  {
-    id = 'rush', name = 'Rush Order',
-    desc = 'Shifts are 20 seconds shorter.',
-    setup = function(r) r.shiftLen = r.shiftLen - 20 end,
-  },
-  {
-    id = 'inspection', name = 'Inspection',
-    desc = 'Raw materials and dust sell for $0.',
-    value = function(s, ctx)
-      if ctx.tier == 1 then ctx.value = 0 end
-    end,
-  },
 }
 
 return Contracts

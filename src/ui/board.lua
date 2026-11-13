@@ -12,6 +12,7 @@ local Map = require 'src.map'
 local Market = require 'src.market'
 local Items = require 'src.data.items'
 local Machines = require 'src.data.machines'
+local Alternates = require 'src.data.alternates'
 
 local Board = {}
 
@@ -91,8 +92,46 @@ local function drawCard(app, i, offer)
   if UI.button('TAKE ' .. i, x + w - 54, y + h - 17, 50, 13, { color = P.green }) then take(app, i) end
 end
 
+-- Beating a boss: one of three blueprints (or recipes), free.
+local REWARD = { y = 44, w = 96, h = 96 }
+local function rewardX(i, n) return 160 - (n * 100 - 4) / 2 + (i - 1) * 100 end
+
+local function drawReward(app)
+  local run = app.run
+  local options = run.reward.options
+  UI.rect(0, 0, 320, 180, P.bg)
+  UI.textCenter('BOSS BEATEN', 160, 8, P.gold, 2)
+  UI.textCenter('TAKE ONE. IT IS YOURS FOR THE REST OF THE RUN.', 160, 26, P.dim)
+  for i, o in ipairs(options) do
+    local x, y, w, h = rewardX(i, #options), REWARD.y, REWARD.w, REWARD.h
+    local hot = UI.inside(x, y, w, h)
+    UI.panel(x, y, w, h, P.panel, hot and P.text or P.line)
+    local name, desc, kind
+    if o.type == 'blueprint' then
+      local def = Machines[o.id]
+      name, kind = def.name, o.id
+      desc = def.desc .. ' ' .. Fmt.perMin(def.time) .. ', ' .. def.draw .. 'W.'
+    else
+      local alt = Alternates.byId[o.id]
+      name, desc, kind = alt.name, alt.desc, alt.kind
+    end
+    UI.sprite(Sprites.machine[kind], x + 5, y + 5)
+    UI.text(o.type == 'blueprint' and 'BLUEPRINT' or 'RECIPE', x + 25, y + 5, P.cyan)
+    UI.text(name, x + 25, y + 13, P.text)
+    UI.paragraph(desc, x + 5, y + 26, 21, P.dim)
+    if UI.button('TAKE ' .. i, x + 5, y + h - 17, w - 10, 13, { color = P.green }) then
+      run:takeReward(i)
+      return
+    end
+  end
+end
+
 function Board.draw(app)
   local run = app.run
+  if run.reward then
+    drawReward(app)
+    return
+  end
   local c = run:contract(run.index + 1)
   UI.rect(0, 0, 320, 180, P.bg)
   UI.text('NEXT CONTRACT', 8, 5, P.text, 2)
@@ -118,12 +157,22 @@ function Board.at(i)
   return cardX(i) + CARD.w - 29, CARD.y + CARD.h - 10
 end
 
+-- And of a boss reward's.
+function Board.rewardAt(i, n)
+  return rewardX(i, n) + REWARD.w / 2, REWARD.y + REWARD.h - 10
+end
+
 function Board.press(app, x, y, b)
   UI.click = { x = x, y = y, b = b }
 end
 
 function Board.key(app, key)
-  if key == '1' then take(app, 1) elseif key == '2' then take(app, 2) end
+  local n = tonumber(key)
+  if app.run.reward then
+    if n then app.run:takeReward(n) end
+  elseif n == 1 or n == 2 then
+    take(app, n)
+  end
 end
 
 return Board
