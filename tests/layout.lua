@@ -3,6 +3,7 @@
 --   kinds: b belt   s smelter  p press     a assembler  c crusher
 --          o polisher  g generator  y splitter  x bridge
 --          I iron port  C copper port  K coal port  G gold port  E export
+--          # rock  * booster pad (floor only)
 --          .  empty
 --   dirs:  > v < ^   (or . for none)
 
@@ -21,7 +22,11 @@ return function(rows)
     local x = 0
     for cell in row:gmatch('%S%S') do
       local k, d = cell:sub(1, 1), DIRS[cell:sub(2, 2)]
-      if PORTS[k] then
+      if k == '#' then
+        F:place('rock', x, y - 1, 0)
+      elseif k == '*' then
+        F:setFloor(x, y - 1, 'pad')
+      elseif PORTS[k] then
         F:place('port', x, y - 1, d, { item = PORTS[k] })
       elseif KINDS[k] then
         F:place(KINDS[k], x, y - 1, d)

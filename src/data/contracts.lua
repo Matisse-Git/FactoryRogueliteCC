@@ -1,4 +1,4 @@
--- Run structure: 3 sectors x 3 contracts. Every third contract is a boss.
+-- Run structure: sectors of 3 contracts. Every third contract is a boss.
 -- Boss twists use the same hooks as upgrades (see src/data/upgrades.lua).
 
 local Contracts = {}
@@ -14,14 +14,18 @@ Contracts.basePower = 16    -- watts the run starts with
 Contracts.powerStep = 8     -- watts per power purchase in the shop
 Contracts.powerCost = 4     -- its first price; +1 per purchase
 
--- Raw resources on the input ports of each sector.
--- A nested list means "pick one of these with the run's seed".
--- Coal arrives in sector 2 so generators are never a dead purchase.
-Contracts.sectorPorts = {
-  { 'iron_ore', 'copper_ore' },
-  { 'iron_ore', 'copper_ore', 'coal' },
-  { 'iron_ore', 'copper_ore', 'coal', 'gold_ore' },
+-- The plot a run starts on: the depot in the middle and these ports.
+Contracts.startPlot = { items = { 'iron_ore', 'copper_ore' }, rocks = 0 }
+
+-- New land, by sector: one plot is annexed for every contract after the
+-- first. `ports` and `rocks` are { min, max }.
+Contracts.land = {
+  { resources = { 'iron_ore', 'copper_ore', 'coal' },             ports = { 1, 2 }, rocks = { 1, 3 } },
+  { resources = { 'iron_ore', 'copper_ore', 'coal', 'gold_ore' }, ports = { 2, 2 }, rocks = { 2, 4 } },
+  { resources = { 'iron_ore', 'copper_ore', 'coal', 'gold_ore' }, ports = { 2, 3 }, rocks = { 2, 5 } },
 }
+Contracts.specials = { 'pad', 'node', 'rich', 'premium' }
+Contracts.specialChance = 60   -- percent of new plots that carry one
 
 -- Payout in credits.
 Contracts.reward = { normal = 5, boss = 8, perUnusedShift = 2, interestPer = 5, interestCap = 5 }
@@ -29,6 +33,15 @@ Contracts.startCredits = 4
 Contracts.startBlueprints = { 'smelter', 'press' }
 Contracts.upgradeSlots = 5
 Contracts.rerollCost = 2
+
+-- Always-on rule of the site: a premium depot face pays extra. It takes
+-- part in a sale like an upgrade does, so the ledger shows what it earned.
+Contracts.premium = {
+  id = 'premium', name = 'Premium Face', color = 'gold',
+  value = function(s, ctx)
+    if ctx.premium then ctx.value = ctx.value * ctx.premium end
+  end,
+}
 
 Contracts.bosses = {
   {
@@ -47,7 +60,7 @@ Contracts.bosses = {
   },
   {
     id = 'narrow_dock', name = 'Narrow Dock',
-    desc = 'The export accepts only 1 item every 2 seconds.',
+    desc = 'Each depot tile accepts only 1 item every 2 seconds.',
     setup = function(r) r.exportPeriod = 2 end,
   },
   {

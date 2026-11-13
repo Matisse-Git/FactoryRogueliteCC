@@ -11,7 +11,7 @@ end
 
 local raw = {
   bg = '0f0e17', dark = '08070d',
-  floor = '191726', floor2 = '22203a',
+  floor = '191726', floor2 = '22203a', pad = '1b2a3c',
   panel = '1c1a2e', panel2 = '2b2846', line = '47436e',
   text = 'e8e4d8', dim = '8884aa', faint = '57547a',
 

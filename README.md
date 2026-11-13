@@ -157,5 +157,9 @@ with its own change in slot order, and the credits add up to the shift total.
 
 Version 1.0 is being built on the `v1-overhaul` branch, one milestone at a time.
 Done so far: blueprints, power as the budget, warm-start shifts, rates and
-utilisation on screen. Quotas are not yet retuned for any of it. No audio, no
-saved runs. Art is placeholder.
+utilisation on screen; one persistent site of 4x3 plots around a central depot,
+new land every contract, a camera with two zoom levels (wheel or Z, WASD or
+middle-drag to move), and select / copy / cut / paste (V, then C, X, Delete).
+Quotas are not yet retuned for any of it, and the rest of this file still
+describes the single-board prototype in places. No audio, no saved runs. Art is
+placeholder.

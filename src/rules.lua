@@ -92,11 +92,13 @@ end
 -- Price one item. Returns the $ value, the sale context, and the mods that
 -- changed this sale as a list of { mod, delta } in slot order (nil if none).
 -- ctx.plain is what the item would have paid with no mods at all.
-function Rules:sale(it, tick, len)
+-- info.premium: the price multiplier of the depot face it came in through.
+function Rules:sale(it, tick, len, info)
   local def = Items[it.type]
   local ctx = {
     type = it.type, polished = it.polished, dist = it.dist,
     tick = tick, len = len, mats = {},
+    premium = info and info.premium or nil,
   }
   for _, m in ipairs(def.mats) do ctx.mats[m] = true end
   ctx.plain = def.value * 2 ^ ctx.polished

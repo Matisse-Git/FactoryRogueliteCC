@@ -1,10 +1,17 @@
 -- All pixel art, authored as text and turned into images at load time.
 -- Placeholder art: replace any entry with love.graphics.newImage('file.png').
+--
+-- Everything on the board exists at two sizes, one per zoom level:
+--   Sprites.set[16]  close view: 16 px tiles, 8 px items
+--   Sprites.set[8]   overview:    8 px tiles, 4 px items
+-- Both sets have the same keys: floor, pad, locked, belt[1..4], corner[1..4],
+-- inlet, machine[kind], item[id]. Sprites.machine / item / belt are the big
+-- set, for the screens that do not zoom.
 
 local P = require 'src.gfx.palette'
 local Items = require 'src.data.items'
 
-local Sprites = { item = {}, machine = {}, belt = {}, corner = {} }
+local Sprites = { set = { [16] = {}, [8] = {} } }
 
 -- Characters used in the sprite text below.
 local MAP = {
@@ -142,9 +149,24 @@ local FORMS = {
   },
 }
 
----------------------------------------------------------------- machine icons (10x10)
+-- The same shapes at 4x4, for the overview. Forms without an entry are a blob.
+local MINI_FORMS = {
+  default = { '.AA.', 'ACAA', 'AAAB', '.BB.' },
+  dust    = { '....', '.A..', 'ACA.', 'BAAB' },
+  ingot   = { '....', 'CCCC', 'AAAB', 'BBBB' },
+  gear    = { '.AA.', 'A00A', 'A00A', '.AA.' },
+  wire    = { 'CCCC', '.AA.', 'AAAA', '.BB.' },
+  foil    = { '..CC', '.CAB', 'CAB.', 'BB..' },
+  beam    = { 'CCCC', '.AA.', '.AA.', 'BBBB' },
+  motor   = { '000.', '3u34', '3u34', '000.' },
+  circuit = { 'gggg', 'gdgd', 'gddg', 'GGGG' },
+  gem     = { '.Cw.', 'CwAB', '.AB.', '....' },
+}
 
-local ICONS = {
+---------------------------------------------------------------- machine icons
+-- BIG: 10x10, drawn on a 16x16 bevelled body. SMALL: 6x6, on an 8x8 body.
+
+local BIG = {
   smelter = {
     '....o.....',
     '...oo.....',
@@ -217,6 +239,66 @@ local ICONS = {
     '..........',
     '..........',
   },
+  wiremill = {
+    '..........',
+    '.UUUUUUUU.',
+    'u........u',
+    '.UUUUUUUU.',
+    'u........u',
+    '.UUUUUUUU.',
+    'u........u',
+    '.uuuuuuuu.',
+    '..........',
+    '..........',
+  },
+  foundry = {
+    'o........o',
+    'oo......oo',
+    '.oo....oo.',
+    '.oyyyyyyo.',
+    '.oyywwyyo.',
+    '..oyyyyo..',
+    '...oooo...',
+    '....33....',
+    '..333333..',
+    '..........',
+  },
+  refinery = {
+    '..cc......',
+    '..cc..cc..',
+    '..cc..cc..',
+    '..cc..cc..',
+    '.cccccccc.',
+    '.c.cccc.c.',
+    '.c.cccc.c.',
+    '.cccccccc.',
+    '..........',
+    '..........',
+  },
+  manufacturer = {
+    '...4444...',
+    '..44..44..',
+    '.44....44.',
+    '.4..ww..4.',
+    '.4.wwww.4.',
+    '.4.wwww.4.',
+    '.4..ww..4.',
+    '.44....44.',
+    '..44..44..',
+    '...4444...',
+  },
+  packer = {
+    '.DDDDDDDD.',
+    '.d.dddd.d.',
+    '.dddddddd.',
+    '.d......d.',
+    '.d..dd..d.',
+    '.d..dd..d.',
+    '.d......d.',
+    '.dddddddd.',
+    '..........',
+    '..........',
+  },
   splitter = {   -- drawn facing east, rotated at draw time
     '....4.....',
     '...444....',
@@ -227,6 +309,18 @@ local ICONS = {
     '....4.....',
     '...444....',
     '....4.....',
+    '..........',
+  },
+  filter = {     -- drawn facing east, rotated at draw time
+    '4.........',
+    '44........',
+    '444.......',
+    '4444......',
+    '444444444.',
+    '4444......',
+    '444.......',
+    '44........',
+    '4.........',
     '..........',
   },
   export = {
@@ -241,18 +335,55 @@ local ICONS = {
     '....ww....',
     '..........',
   },
+  node = {
+    '......cc..',
+    '.....cc...',
+    '....cc....',
+    '...ccccc..',
+    '.....cc...',
+    '....cc....',
+    '...cc.....',
+    '..cc......',
+    '..........',
+    '..........',
+  },
+}
+
+local SMALL = {
+  smelter      = { '..o...', '.oyo..', '.oyyo.', 'oywwyo', 'oyyyyo', '.oooo.' },
+  press        = { '444444', '..33..', '..33..', '.3333.', '......', '222222' },
+  assembler    = { '4....4', '.4..4.', '..44..', '..44..', '.4444.', '..44..' },
+  crusher      = { '444444', '.4.4.4', '......', '.u..u.', '4.4.4.', '444444' },
+  polisher     = { '..w...', '.wpw..', 'wpppw.', '.wpw.w', '..w.wp', '.....w' },
+  generator    = { '...yy.', '..yy..', '.yyyy.', '..yy..', '.yy...', 'yy....' },
+  wiremill     = { '.UUUU.', 'u....u', '.UUUU.', 'u....u', '.uuuu.', '......' },
+  foundry      = { 'o....o', 'oo..oo', '.oyyo.', '.oyyo.', '..oo..', '.3333.' },
+  refinery     = { '.cc...', '.cc.cc', '.cc.cc', 'cccccc', 'c.cc.c', 'cccccc' },
+  manufacturer = { '.4444.', '44..44', '4.ww.4', '4.ww.4', '44..44', '.4444.' },
+  packer       = { 'DDDDDD', 'd.dd.d', 'dddddd', 'd....d', 'd....d', 'dddddd' },
+  splitter     = { '..4.4.', '...44.', '444444', '...44.', '..4.4.', '......' },
+  filter       = { '4.....', '44....', '44444.', '44....', '4.....', '......' },
+  export       = { '.wwww.', 'ww....', '.www..', '...ww.', 'wwww..', '..w...' },
+  node         = { '...cc.', '..cc..', '.cccc.', '..cc..', '.cc...', 'cc....' },
 }
 
 local BODY = {   -- body, highlight, shade
-  smelter   = { '5a2c2c', '7c4242', '3a1b1e' },
-  press     = { '3a4766', '55668c', '252e46' },
-  assembler = { '2a5654', '3f7a76', '1a3838' },
-  crusher   = { '5a5034', '7c7050', '3a3320' },
-  polisher  = { '4a3870', '6a5498', '2e2248' },
-  generator = { '6a5a22', '8e7c38', '443a14' },
-  splitter  = { '3a3852', '55527a', '25233a' },
-  export    = { '2c6e3a', '46a058', '1a4424' },
-  port      = { '2b2846', '47436e', '1a182c' },
+  smelter      = { '5a2c2c', '7c4242', '3a1b1e' },
+  press        = { '3a4766', '55668c', '252e46' },
+  assembler    = { '2a5654', '3f7a76', '1a3838' },
+  crusher      = { '5a5034', '7c7050', '3a3320' },
+  polisher     = { '4a3870', '6a5498', '2e2248' },
+  generator    = { '6a5a22', '8e7c38', '443a14' },
+  wiremill     = { '4a3524', '6e5238', '2e2014' },
+  foundry      = { '5e3a1e', '84562e', '3c2412' },
+  refinery     = { '234a5a', '386e82', '14303a' },
+  manufacturer = { '3a3a5e', '56568a', '24243e' },
+  packer       = { '5a4a2a', '80693e', '3a2f18' },
+  splitter     = { '3a3852', '55527a', '25233a' },
+  filter       = { '3a3852', '55527a', '25233a' },
+  export       = { '2c6e3a', '46a058', '1a4424' },
+  port         = { '2b2846', '47436e', '1a182c' },
+  node         = { '1f3f66', '32609a', '12263f' },
 }
 
 local RUBBLE = {
@@ -274,48 +405,94 @@ local RUBBLE = {
   '................',
 }
 
--- A 16x16 bevelled machine body with an optional 10x10 icon on top.
-local function chassis(kind)
+local RUBBLE_SMALL = {
+  '........',
+  '..0000..',
+  '.034320.',
+  '03433220',
+  '03322210',
+  '.022210.',
+  '..0000..',
+  '........',
+}
+
+-- A bevelled machine body with an optional icon on top, 16 or 8 px.
+local function chassis(kind, size)
   local body, light, shade = P.hex(BODY[kind][1]), P.hex(BODY[kind][2]), P.hex(BODY[kind][3])
-  local data = love.image.newImageData(16, 16)
-  for y = 1, 14 do
-    for x = 1, 14 do
-      local corner = (x == 1 or x == 14) and (y == 1 or y == 14)
-      if not corner then
+  local data = love.image.newImageData(size, size)
+  if size == 16 then
+    for y = 1, 14 do
+      for x = 1, 14 do
+        local corner = (x == 1 or x == 14) and (y == 1 or y == 14)
+        if not corner then
+          local c = body
+          if x == 1 or x == 14 or y == 1 or y == 14 then c = P.dark
+          elseif x == 2 or y == 2 then c = light
+          elseif x == 13 or y == 13 then c = shade end
+          data:setPixel(x, y, c[1], c[2], c[3], 1)
+        end
+      end
+    end
+    if BIG[kind] then paint(data, BIG[kind], MAP, 3, 3) end
+  else
+    for y = 0, 7 do
+      for x = 0, 7 do
         local c = body
-        if x == 1 or x == 14 or y == 1 or y == 14 then c = P.dark
-        elseif x == 2 or y == 2 then c = light
-        elseif x == 13 or y == 13 then c = shade end
+        if x == 0 or y == 0 then c = light
+        elseif x == 7 or y == 7 then c = shade end
         data:setPixel(x, y, c[1], c[2], c[3], 1)
       end
     end
+    if SMALL[kind] then paint(data, SMALL[kind], MAP, 1, 1) end
   end
-  if ICONS[kind] then paint(data, ICONS[kind], MAP, 3, 3) end
   return image(data)
 end
 
-local function floorTile()
-  local data = love.image.newImageData(16, 16)
-  for y = 0, 15 do
-    for x = 0, 15 do
-      local c = (x == 15 or y == 15) and P.bg or P.floor
+-- Floor of an owned plot. `pad` marks a booster pad.
+local function floorTile(size, pad)
+  local data = love.image.newImageData(size, size)
+  local last = size - 1
+  for y = 0, last do
+    for x = 0, last do
+      local c = (x == last or y == last) and P.bg or P.floor
       if x == 0 and y == 0 then c = P.floor2 end
+      if pad then
+        -- A ring of chevrons: whatever stands here runs faster.
+        local edge = x == 0 or y == 0 or x == last - 1 or y == last - 1
+        if edge and (x + y) % 2 == 0 and x < last and y < last then c = P.cyanD end
+        if not edge and x < last and y < last then c = P.pad end
+      end
       data:setPixel(x, y, c[1], c[2], c[3], 1)
     end
   end
   return image(data)
 end
 
--- Belt facing east; `frame` scrolls the chevrons 2 px.
-local function beltFrame(frame)
-  local data = love.image.newImageData(16, 16)
-  for y = 2, 13 do
-    for x = 0, 15 do
+-- Land that is not yours (yet).
+local function lockedTile(size)
+  local data = love.image.newImageData(size, size)
+  for y = 0, size - 1 do
+    for x = 0, size - 1 do
+      local c = P.bg
+      if x == size / 2 and y == size / 2 then c = P.floor end
+      data:setPixel(x, y, c[1], c[2], c[3], 1)
+    end
+  end
+  return image(data)
+end
+
+-- Belt facing east; `frame` scrolls the chevrons a quarter of their spacing.
+local function beltFrame(size, frame)
+  local k = size / 16
+  local data = love.image.newImageData(size, size)
+  local top, bottom = 2 * k, size - 2 * k - 1
+  for y = top, bottom do
+    for x = 0, size - 1 do
       local c
-      if y == 2 or y == 13 then
+      if y == top or y == bottom then
         c = P.rail
       else
-        local v = (x + math.abs(y - 7.5) - 0.5 - frame * 2) % 8
+        local v = (x / k + math.abs(y / k - 7.5 + (k < 1 and 0.5 or 0)) - 0.5 - frame * 2) % 8
         c = (v < 2) and P.beltL or P.belt
       end
       data:setPixel(x, y, c[1], c[2], c[3], 1)
@@ -328,15 +505,16 @@ end
 -- Flip it vertically for a feed from the south; rotate for other headings.
 -- The chevrons fan around the top-right corner of the tile and stay in
 -- phase with the straight belts on either end.
-local function cornerFrame(frame)
-  local data = love.image.newImageData(16, 16)
-  for y = 0, 15 do
-    for x = 0, 15 do
-      local dx, dy = 16 - (x + 0.5), y + 0.5
-      local r = math.sqrt(dx * dx + dy * dy)
+local function cornerFrame(size, frame)
+  local k = size / 16
+  local data = love.image.newImageData(size, size)
+  for y = 0, size - 1 do
+    for x = 0, size - 1 do
+      local dx, dy = size - (x + 0.5), y + 0.5
+      local r = math.sqrt(dx * dx + dy * dy) / k
       if r >= 2 and r < 14 then
         local c
-        if r < 3 or r >= 13 then
+        if r < 2 + 1 / k or r >= 14 - 1 / k then
           c = P.rail
         else
           local along = math.atan2(dy, dx) / (math.pi / 2) * 16
@@ -352,69 +530,96 @@ end
 
 -- Overlay for a straight belt (facing east) that is fed from the north:
 -- opens the rail and carries the incoming belt's surface in.
-local function inletTile()
-  local data = love.image.newImageData(16, 16)
-  for y = 0, 2 do
-    for x = 2, 13 do
-      local edge = x == 2 or x == 13
-      if not (edge and y == 2) then
+local function inletTile(size)
+  local k = size / 16
+  local data = love.image.newImageData(size, size)
+  local l, r = 2 * k, size - 2 * k - 1
+  for y = 0, 2 * k do
+    for x = l, r do
+      local edge = x == l or x == r
+      if not (edge and y == 2 * k) then
         local c = edge and P.rail or P.belt
         data:setPixel(x, y, c[1], c[2], c[3], 1)
       end
     end
   end
-  -- A small arrowhead pointing into the belt.
-  for i = 0, 2 do
-    data:setPixel(5 + i, i, P.beltL[1], P.beltL[2], P.beltL[3], 1)
-    data:setPixel(10 - i, i, P.beltL[1], P.beltL[2], P.beltL[3], 1)
+  if size == 16 then
+    -- A small arrowhead pointing into the belt.
+    for i = 0, 2 do
+      data:setPixel(5 + i, i, P.beltL[1], P.beltL[2], P.beltL[3], 1)
+      data:setPixel(10 - i, i, P.beltL[1], P.beltL[2], P.beltL[3], 1)
+    end
   end
   return image(data)
 end
 
-local function bridgeTile()
-  local data = love.image.newImageData(16, 16)
+local function bridgeTile(size)
+  local k = size / 16
+  local data = love.image.newImageData(size, size)
   local function px(x, y, c) data:setPixel(x, y, c[1], c[2], c[3], 1) end
-  for y = 2, 13 do            -- lower lane, east-west
-    for x = 0, 15 do px(x, y, (y == 2 or y == 13) and P.rail or P.belt) end
+  local a, b = 2 * k, size - 2 * k - 1
+  for y = a, b do              -- lower lane, east-west
+    for x = 0, size - 1 do px(x, y, (y == a or y == b) and P.rail or P.belt) end
   end
-  for y = 0, 15 do            -- upper lane, north-south
-    for x = 2, 13 do
+  for y = 0, size - 1 do       -- upper lane, north-south
+    for x = a, b do
       local c = P.beltL
-      if x == 2 or x == 13 then c = P.ironD end
-      if (x == 3 or x == 12) then c = P.iron end
+      if x == a or x == b then c = P.ironD end
+      if size == 16 and (x == a + 1 or x == b - 1) then c = P.iron end
       px(x, y, c)
     end
   end
-  for i = 5, 10 do px(i, 7, P.rail); px(i, 8, P.rail) end
+  local m = size / 2
+  for i = math.floor(m - 3 * k), math.ceil(m + 3 * k) - 1 do px(i, m - 1, P.rail); px(i, m, P.rail) end
   return image(data)
 end
 
-function Sprites.load()
-  Sprites.floor = floorTile()
+local MACHINES = {
+  'smelter', 'press', 'assembler', 'crusher', 'polisher', 'generator',
+  'wiremill', 'foundry', 'refinery', 'manufacturer', 'packer',
+  'splitter', 'filter', 'export', 'port', 'node',
+}
+
+local function buildSet(size)
+  local set = { belt = {}, corner = {}, machine = {}, item = {} }
+  set.floor = floorTile(size)
+  set.pad = floorTile(size, true)
+  set.locked = lockedTile(size)
   for f = 0, 3 do
-    Sprites.belt[f + 1] = beltFrame(f)
-    Sprites.corner[f + 1] = cornerFrame(f)
+    set.belt[f + 1] = beltFrame(size, f)
+    set.corner[f + 1] = cornerFrame(size, f)
   end
-  Sprites.inlet = inletTile()
-  for _, kind in ipairs({ 'smelter', 'press', 'assembler', 'crusher', 'polisher',
-                          'generator', 'splitter', 'export', 'port' }) do
-    Sprites.machine[kind] = chassis(kind)
-  end
-  Sprites.machine.bridge = bridgeTile()
-  Sprites.machine.rubble = fromRows(RUBBLE)
-  Sprites.machine.belt = Sprites.belt[1]
+  set.inlet = inletTile(size)
+  for _, kind in ipairs(MACHINES) do set.machine[kind] = chassis(kind, size) end
+  set.machine.bridge = bridgeTile(size)
+  set.machine.rubble = fromRows(size == 16 and RUBBLE or RUBBLE_SMALL)
+  set.machine.rock = set.machine.rubble
+  set.machine.belt = set.belt[1]
 
   for id, def in pairs(Items) do
     if type(def) == 'table' and def.form then
       local map = setmetatable({
         A = P[def.mat], B = P[def.mat .. 'D'], C = P[def.mat .. 'L'],
       }, { __index = MAP })
-      Sprites.item[id] = fromRows(FORMS[def.form], map)
+      if size == 16 then
+        set.item[id] = fromRows(FORMS[def.form], map)
+      else
+        set.item[id] = fromRows(MINI_FORMS[def.form] or MINI_FORMS.default, map)
+      end
     end
   end
+  return set
+end
+
+function Sprites.load()
+  Sprites.set[16] = buildSet(16)
+  Sprites.set[8] = buildSet(8)
+  local big = Sprites.set[16]
+  Sprites.floor, Sprites.belt, Sprites.corner, Sprites.inlet = big.floor, big.belt, big.corner, big.inlet
+  Sprites.machine, Sprites.item = big.machine, big.item
 end
 
 -- Kinds whose sprite turns with the building's direction.
-Sprites.rotates = { belt = true, splitter = true }
+Sprites.rotates = { belt = true, splitter = true, filter = true }
 
 return Sprites

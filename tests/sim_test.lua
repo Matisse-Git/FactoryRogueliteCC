@@ -330,7 +330,7 @@ return function()
     check('an unfed belt is straight', shape(0, 0).corner == nil and not shape(0, 0).back)
   end
 
-  -- 10c. Boss rubble comes and goes with the contract.
+  -- 10c. Boss rubble comes and goes with the contract, on owned land only.
   do
     local run = Run.new(5)
     for _, b in ipairs(Contracts.bosses) do
@@ -338,10 +338,102 @@ return function()
     end
     run.index = 2
     run:advance()
-    check('Rockfall buries 8 tiles', #run.factory.world:query('rubble') == 8)
+    local rubble, onLand = run.factory.world:query('rubble'), true
+    for _, e in ipairs(rubble) do onLand = onLand and run.map:owned(e.pos.x, e.pos.y) end
+    check('Rockfall buries 8 tiles of your land', #rubble == 8 and onLand, #rubble)
     run:advance()
     check('rubble is cleared for the next contract', #run.factory.world:query('rubble') == 0)
-    check('sector 2 adds a third port', #run.factory.world:query('port') == 3)
+  end
+
+  -- 10e. The site: plots, the depot, and what the land does.
+  do
+    local Map = require 'src.map'
+    local Route = require 'tests.route'
+    local run = Run.new(11)
+    local F, map = run.factory, run.map
+    check('the site is 4x3 plots of 8x6 tiles', F.W == 32 and F.H == 18 and Map.W == 32 and Map.H == 18)
+    check('a run starts on one plot in the middle row', map.count == 1 and (map:has(1, 1) or map:has(2, 1)))
+    local depot = F.world:query('export')
+    check('the depot is a fixed 2x2 block', #depot == 4 and depot[1].building.fixed
+      and depot[4].pos.x == depot[1].pos.x + 1 and depot[4].pos.y == depot[1].pos.y + 1)
+    check('the depot has 8 faces', #map:depotFaces() == 8)
+    local ports = F.world:query('port')
+    check('the start plot has an iron and a copper port at 30/min',
+      #ports == 2 and ports[1].port.period == 2 and ports[2].port.period == 2
+      and ports[1].port.item ~= ports[2].port.item)
+    local d = depot[1].pos
+    check('you can build on your plot, not off it',
+      run:canBuild(d.x - 1, d.y) and not run:canBuild((d.x + 16) % 32, d.y))
+    check('contract 1 brings no new land', run.pendingPlot == nil)
+
+    -- Both ports belted to the depot: 60 ore a shift, wherever the ports are.
+    for _, port in ipairs(Route.ports(run)) do
+      check('a port can be routed to the depot', Route.belt(run, port) ~= nil)
+    end
+    run:beginShift()
+    while not F:finished() do F:step() end
+    local s = run:endShift()
+    check('two belted ports sell 60 ore a shift', s.total == 60 and run.progress == 60, s.total)
+    check('run API: status is set', s.status == 'next' or s.status == 'cleared', s.status)
+
+    -- The next contract comes with a plot, placed in a slot touching your land.
+    run.progress = 0
+    run:advance()
+    local plot = run.pendingPlot
+    check('contract 2 offers a plot with ports', plot ~= nil and #plot.ports >= 1)
+    local free = map:free()
+    local sx = map:has(1, 1) and 1 or 2
+    check('free slots are the ones touching your land', #free == 4, #free)
+    check('land cannot be placed away from yours', not run:annex(sx == 1 and 3 or 0, 0))
+    check('land cannot be placed on yours', not run:annex(sx, 1))
+    local before = #F.world:query('port')
+    check('the plot goes into a free slot', run:annex(free[1][1], free[1][2]) and run.pendingPlot == nil)
+    check('and brings its ports', #F.world:query('port') == before + #plot.ports and map.count == 2)
+    check('its tiles are yours now', run:canBuild(free[1][1] * 8 + 3, free[1][2] * 6 + 3))
+
+    -- Specials.
+    local rng = require('src.rng').new(3)
+    local node = Map.generate(rng, { items = { 'coal' }, rocks = 2, special = 'node' })
+    local watts = run:basePower()
+    run.pendingPlot = node
+    local slot = map:free()[1]
+    run:annex(slot[1], slot[2])
+    check('a power node adds 12W', run:basePower() == watts + 12 and run.rules.basePower == watts + 12)
+    check('rocks cannot be built on or removed', #node.rocks == 2
+      and F:at(slot[1] * 8 + node.rocks[1].x, slot[2] * 6 + node.rocks[1].y).building.fixed)
+
+    local rich = Map.generate(rng, { items = { 'coal', 'iron_ore' }, special = 'rich' })
+    local n = 0
+    for _, p in ipairs(rich.ports) do n = n + (p.period == 1 and 1 or 0) end
+    check('a rich port runs at 60/min', n == 1)
+
+    local premium = Map.generate(rng, { items = { 'coal' }, special = 'premium' })
+    run.pendingPlot = premium
+    slot = map:free()[1]
+    run:annex(slot[1], slot[2])
+    local face = premium.face
+    check('a premium plot upgrades one depot face',
+      face ~= nil and F:at(face[1], face[2]).export.premium[face[3]] == Map.PREMIUM)
+    check('the premium rule joins the rules', run.rules.mods[1] == Contracts.premium)
+  end
+
+  -- 10f. Booster pads and premium faces in the simulation.
+  do
+    local layout = require 'tests.layout'
+    local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
+    local plain = layout({ 'I> s> E<' })
+    local padded = layout({ 'I> s> E<' })
+    padded:remove(1, 0)
+    padded:setFloor(1, 0, 'pad')
+    padded:place('smelter', 1, 0, 0)
+    local a, b = count(runShift(plain), 'iron_ingot'), count(runShift(padded), 'iron_ingot')
+    check('a booster pad makes a machine 50% faster (15 -> 22 ingots)', a == 15 and b >= 22 and b <= 23, a .. ' -> ' .. b)
+
+    local F = layout({ 'I> s> E<' })
+    F:at(2, 0).export.premium[0] = 1.5
+    local s = runShift(F, Rules.new({ Contracts.premium }))
+    check('a premium face pays 1.5x (15 ingots at $4.50, rounded per sale: $75)', s.total == 75, soldString(s))
+    check('and the ledger credits it', s.ledger[Contracts.premium].n == 15)
   end
 
   -- 11. Runs are reproducible from the seed.
@@ -362,35 +454,9 @@ return function()
     check('different seed, different run', describe(1234) ~= describe(99))
   end
 
-  -- 12. A run can be played start to finish through the Run API.
+  -- 12. Blueprints and the shop, through the Run API.
   do
     local run = Run.new(7)
-    local F = run.factory
-    local port, export
-    for _, e in ipairs(F.world:query('building')) do
-      if e.port and not port then port = e end
-      if e.export then export = e end
-    end
-    -- Snake a belt from the first port to the export.
-    local y = port.pos.y
-    for x = 1, 12 do F:place('belt', x, y, 0) end
-    local ey = export.pos.y
-    if ey == y then
-      -- already lined up
-    else
-      local step = ey > y and 1 or -1
-      local dir = ey > y and 1 or 3
-      F:remove(12, y)
-      for yy = y, ey - step, step do
-        if not F:at(12, yy) then F:place('belt', 12, yy, dir) end
-      end
-      F:place('belt', 12, ey, 0)
-    end
-    run:beginShift()
-    while not F:finished() do F:step() end
-    local s = run:endShift()
-    check('run API: shift produces revenue', s.total > 0 and run.progress == s.total, s.total)
-    check('run API: status is set', s.status == 'next' or s.status == 'cleared', s.status)
 
     -- Blueprints: a kind is unlocked for the whole run, in any number.
     check('a run starts with the smelter and press blueprints',

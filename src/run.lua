@@ -1,6 +1,8 @@
--- One run: the factory, blueprints, upgrades, credits and contract progress.
+-- One run: the site and its factory, blueprints, upgrades, credits and
+-- contract progress.
 
 local Factory = require 'src.sim.factory'
+local Map = require 'src.map'
 local Rules = require 'src.rules'
 local Rng = require 'src.rng'
 local Machines = require 'src.data.machines'
@@ -24,9 +26,16 @@ function Run.new(seed)
   r.index = 1                -- current contract
   r.progress = 0             -- revenue banked on the current contract
   r.shiftsUsed = 0
-  r.factory = Factory.new()
   r.won, r.lost = false, false
   r.shop = nil
+
+  -- The site: one factory for the whole run, growing a plot per contract.
+  r.factory = Factory.new(Map.W, Map.H)
+  r.map = Map.new()
+  local start = Map.generate(r.layoutRng, {
+    items = Contracts.startPlot.items, rocks = Contracts.startPlot.rocks, depot = true,
+  })
+  r.map:annex(start, r.layoutRng:int(1, 2), 1, r.factory)
 
   -- One boss per sector, fixed by the seed.
   local pool = {}
@@ -54,77 +63,70 @@ function Run:contract(index)
   }
 end
 
--- Active rule set: upgrades left to right, then the boss twist.
+-- Watts the site supplies before any mod: bought power plus power nodes.
+function Run:basePower()
+  return self.power + self.map:nodes() * Map.NODE_WATTS
+end
+
+-- Active rule set: the site's own rules, upgrades left to right, then the
+-- boss twist.
 function Run:refreshRules()
   local mods = {}
+  if self.map.premium > 0 then mods[#mods + 1] = Contracts.premium end
   for _, id in ipairs(self.upgrades) do mods[#mods + 1] = Upgrades.byId[id] end
   local c = self:contract()
   if c.boss then mods[#mods + 1] = c.boss end
-  self.rules = Rules.new(mods, { basePower = self.power })
+  self.rules = Rules.new(mods, { basePower = self:basePower() })
   return self.rules
 end
 
----------------------------------------------------------------- board setup
+---------------------------------------------------------------- land
 
--- Pick `n` rows with at least one free row between them.
-local function pickRows(rng, n, H)
-  for _ = 1, 50 do
-    local rows, ok = {}, true
-    for i = 1, n do rows[i] = rng:int(0, H - 1) end
-    table.sort(rows)
-    for i = 2, n do
-      if rows[i] - rows[i - 1] < 2 then ok = false end
-    end
-    if ok then return rows end
-  end
-  local rows = {}
-  for i = 1, n do rows[i] = (i - 1) * 2 end
-  return rows
+-- Can the player build on this tile? Only on plots they own.
+function Run:canBuild(x, y)
+  return self.map:owned(x, y)
 end
 
-function Run:rollPorts(sector)
-  local F, rng = self.factory, self.layoutRng
-  -- Out with the old ports.
-  for y = 0, Factory.H - 1 do
-    for x = 0, Factory.W - 1 do
-      local e = F:at(x, y)
-      if e and (e.port or e.export) then F:remove(x, y, true) end
-    end
-  end
-  local spec = Contracts.sectorPorts[math.min(sector, #Contracts.sectorPorts)]
+-- The plot offered for a contract in this sector.
+function Run:rollPlot(sector)
+  local rng = self.layoutRng
+  local land = Contracts.land[math.min(sector, #Contracts.land)]
+  local pool = {}
+  for i, item in ipairs(land.resources) do pool[i] = item end
+  rng:shuffle(pool)
   local items = {}
-  for i, entry in ipairs(spec) do
-    items[i] = type(entry) == 'table' and rng:pick(entry) or entry
-  end
-  rng:shuffle(items)
-  local rows = pickRows(rng, #items, Factory.H)
-  for i, item in ipairs(items) do
-    if F:at(0, rows[i]) then F:remove(0, rows[i], true) end
-    F:place('port', 0, rows[i], 0, { item = item })
-  end
-  local ey = rng:int(1, Factory.H - 2)
-  if F:at(Factory.W - 1, ey) then F:remove(Factory.W - 1, ey, true) end
-  F:place('export', Factory.W - 1, ey, 2)
+  for i = 1, rng:int(land.ports[1], land.ports[2]) do items[i] = pool[(i - 1) % #pool + 1] end
+  local special
+  if rng:int(1, 100) <= Contracts.specialChance then special = rng:pick(Contracts.specials) end
+  return Map.generate(rng, {
+    items = items, rocks = rng:int(land.rocks[1], land.rocks[2]), special = special,
+  })
+end
+
+-- Put the pending plot into a free slot touching the land already owned.
+function Run:annex(sx, sy)
+  if not self.pendingPlot or not self.map:canAnnex(sx, sy) then return false end
+  self.map:annex(self.pendingPlot, sx, sy, self.factory)
+  self.pendingPlot = nil
+  self:refreshRules()
+  return true
 end
 
 function Run:clearRubble()
   local F = self.factory
-  for y = 0, Factory.H - 1 do
-    for x = 0, Factory.W - 1 do
-      local e = F:at(x, y)
-      if e and e.rubble then F:remove(x, y, true) end
-    end
-  end
+  local list = F.world:query('rubble')
+  for i = #list, 1, -1 do F:remove(list[i].pos.x, list[i].pos.y, true) end
 end
 
+-- Bury n tiles of owned land. Whatever stood there is removed.
 function Run:placeRubble(n)
   local F, rng = self.factory, self.layoutRng
   local placed, guard = 0, 0
-  while placed < n and guard < 500 do
+  while placed < n and guard < 2000 do
     guard = guard + 1
-    local x, y = rng:int(1, Factory.W - 2), rng:int(0, Factory.H - 1)
+    local x, y = rng:int(0, Map.W - 1), rng:int(0, Map.H - 1)
     local e = F:at(x, y)
-    if not e or not e.building.fixed then
+    if self.map:owned(x, y) and (not e or not e.building.fixed) then
       if e then F:remove(x, y) end
       F:place('rubble', x, y, 0)
       placed = placed + 1
@@ -137,7 +139,9 @@ function Run:startContract()
   self.shiftsUsed = 0
   local c = self:contract()
   self:clearRubble()
-  if c.newSector then self:rollPorts(c.sector) end
+  -- Every contract after the first comes with new land, while there is room.
+  self.pendingPlot = nil
+  if c.index > 1 and #self.map:free() > 0 then self.pendingPlot = self:rollPlot(c.sector) end
   if c.boss and c.boss.rubble then self:placeRubble(c.boss.rubble) end
   self:refreshRules()
 end

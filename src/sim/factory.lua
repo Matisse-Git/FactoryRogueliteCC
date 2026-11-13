@@ -17,7 +17,8 @@ local Transfer = require 'src.sim.transfer'
 
 local Factory = {}
 Factory.__index = Factory
-Factory.W, Factory.H = 14, 10      -- default board size
+Factory.W, Factory.H = 32, 18      -- default board size: the whole site (see src/map.lua)
+Factory.PAD_SPEED = 1.5            -- a machine on a booster pad
 Factory.WARMUP = 150               -- ticks run before the clock starts
 Factory.BUSY = 0.9                 -- share of a shift a machine must work to count as "non-stop"
 
@@ -98,6 +99,7 @@ function Factory.new(w, h)
   F.W, F.H = w or Factory.W, h or Factory.H
   F.world = ECS.world()
   F.grid = {}
+  F.floor = {}                     -- tile index -> 'pad'
   F.slots = {}
   F.events = {}
   F.ovenBelts = {}
@@ -122,6 +124,14 @@ function Factory:at(x, y)
   return self.grid[y * self.W + x]
 end
 
+function Factory:setFloor(x, y, what)
+  self.floor[y * self.W + x] = what
+end
+
+function Factory:floorAt(x, y)
+  return self.floor[y * self.W + x]
+end
+
 -- Spawn a building entity. The tile must be empty.
 function Factory:place(kind, x, y, dir, extra)
   assert(self:inBounds(x, y) and not self:at(x, y), 'tile not free')
@@ -143,9 +153,14 @@ function Factory:place(kind, x, y, dir, extra)
     e.port = { item = extra.item, period = extra.period or 2, cd = 0, sent = 0 }
     e.slot = Transfer.newSlot(e, 'port')
   elseif kind == 'export' then
-    e.export = { cd = 0, taken = 0, sold = 0, log = {} }
+    -- premium[d]: price multiplier for items entering while travelling d.
+    e.export = { cd = 0, taken = 0, sold = 0, log = {}, premium = {} }
   elseif kind == 'rubble' then
     e.rubble = true
+  elseif kind == 'rock' then
+    e.rock = true
+  elseif kind == 'node' then
+    e.node = true
   else
     e.machine = { def = def }
     if not def.generator then e.slot = Transfer.newSlot(e, 'out') end
@@ -247,7 +262,7 @@ function Factory:beginShift(rules, info)
     if e.machine then
       Machine.reset(e)
       e.machine.shiftId = self.shiftId
-      e.machine.speed = rules:speed(self, e)
+      e.machine.speed = rules:speed(self, e) * self:padSpeed(e)
       e.machine.draw = rules:draw(self, e, e.machine.def.draw or 0)
       -- Mods that change this machine where it stands count once per machine.
       e.machine.mods = rules:affecting(self, e)
@@ -323,10 +338,17 @@ function Factory:finished()
   return self.shift.tick >= self.shift.len
 end
 
-function Factory:sell(itemE, exportE)
+-- Speed of a machine from the floor it stands on.
+function Factory:padSpeed(e)
+  return self.floor[e.pos.y * self.W + e.pos.x] == 'pad' and Factory.PAD_SPEED or 1
+end
+
+-- d: the direction the item was travelling when it entered the export.
+function Factory:sell(itemE, exportE, d)
   local s = self.shift
   if s.warming then return end        -- the warm-up sells nothing
-  local value, ctx, fired = self.rules:sale(itemE.item, s.tick, s.len)
+  local value, ctx, fired = self.rules:sale(itemE.item, s.tick, s.len,
+    { premium = d and exportE.export.premium[d] })
   s.revenue = s.revenue + value
   s.plain = s.plain + ctx.plain
   s.sales = s.sales + 1

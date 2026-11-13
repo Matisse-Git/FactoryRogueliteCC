@@ -12,7 +12,7 @@
 --   speed(F, e)         return a speed multiplier for machine entity e
 --   draw(F, e, watts)   return the watts machine entity e draws
 --
--- ctx = { type, form, mats, polished, dist, tick, len, value }
+-- ctx = { type, form, mats, polished, dist, tick, len, value, premium }
 -- sc  = { revenue, mult, notes, sold, kinds, perfect, spare }
 --       perfect: every machine worked at least 90% of the shift
 --       spare:   watts of supply left unused, on average

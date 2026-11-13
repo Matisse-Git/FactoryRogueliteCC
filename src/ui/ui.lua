@@ -125,6 +125,31 @@ function UI.card(def, x, y, pop, bad, lit)
   end
 end
 
+-- A tooltip floating next to the mouse, kept on the canvas.
+-- tip = { title, color, lines = { ... } }; long lines wrap.
+function UI.drawTip(tip, mx, my)
+  local lines = {}
+  for _, s in ipairs(tip.lines or {}) do
+    if s then
+      for _, line in ipairs(Font.wrap(s, 34)) do lines[#lines + 1] = line end
+    end
+  end
+  local w = Font.width(tip.title)
+  for _, line in ipairs(lines) do w = math.max(w, Font.width(line)) end
+  w = w + 8
+  local h = 11 + #lines * 7 + (#lines > 0 and 2 or 0)
+  local x, y = mx + 10, my + 8
+  if x + w > 319 then x = mx - w - 6 end
+  if y + h > 179 then y = my - h - 4 end
+  x, y = math.max(1, math.min(x, 319 - w)), math.max(1, y)
+  UI.rect(x + 1, y + 1, w, h, P.dark, 0.6)
+  UI.panel(x, y, w, h, P.bg, P.line)
+  UI.text(tip.title, x + 4, y + 3, tip.color or P.text)
+  for i, line in ipairs(lines) do
+    UI.text(line, x + 4, y + 4 + i * 7, P.dim)
+  end
+end
+
 function UI.emptySlot(x, y)
   UI.rect(x, y, 16, 16, P.bg)
   UI.frame(x, y, 16, 16, P.faint)

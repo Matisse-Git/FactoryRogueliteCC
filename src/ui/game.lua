@@ -1,5 +1,9 @@
--- The main screen: board on the left, sidebar on the right.
--- Modes: intro -> build -> run -> summary -> (build | shop | over | win)
+-- The main screen: the site in a viewport that scrolls and zooms, the build
+-- palette in a strip under it, the sidebar on the right.
+-- Modes: annex -> intro -> build -> run -> summary -> (build | shop | over | win)
+--
+-- Two zoom levels, both fully playable: close (16 px tiles, scrolls) and
+-- overview (8 px tiles, the whole site on screen).
 
 local P = require 'src.gfx.palette'
 local Font = require 'src.gfx.font'
@@ -8,6 +12,7 @@ local UI = require 'src.ui.ui'
 local Fx = require 'src.ui.fx'
 local Book = require 'src.ui.book'
 local Factory = require 'src.sim.factory'
+local Map = require 'src.map'
 local D = require 'src.sim.dirs'
 local Links = require 'src.sim.links'
 local Machines = require 'src.data.machines'
@@ -17,10 +22,13 @@ local Contracts = require 'src.data.contracts'
 
 local Game = {}
 
-local T = 16                 -- tile size
-local BX, BY = 0, 20         -- board origin
-local SX = 224               -- sidebar origin
+local VX, VY, VW, VH = 0, 16, 256, 144   -- board viewport
+local SX, SW = 256, 64                   -- sidebar
+local PY = 160                           -- palette strip
+local CELL = 16                          -- width of a palette entry
+local CX = VX + VW / 2                   -- centre of the viewport (overlays)
 local TPS = 4                -- simulation ticks per real second at 1x
+local PAN = 160              -- camera speed with the keys, pixels per second
 local BEAT = 0.4             -- summary: seconds between end-of-shift lines
 local COUNT = 0.3            -- summary: seconds the total takes to count up
 local STAMP = 0.12           -- summary: seconds a new line stays highlighted
@@ -35,20 +43,6 @@ local function num(n)
   return string.format('%.1f', n)
 end
 
-function Game.enter(app)
-  local speed = app.g and app.g.speed or 1
-  app.g = {
-    mode = 'intro', tool = nil, dir = 0, speed = speed,
-    acc = 0, frac = 0, paused = false,
-    popups = {}, summary = nil, drag = nil, book = false,
-    stats = app.g and app.g.stats or false,   -- U: utilisation on every machine
-    fx = Fx.new(),      -- card pops and tile flashes
-    reveal = nil,       -- summary playback, see finishShift
-    lit = {},           -- mods changing a machine on the board this frame
-    hoverMod = nil,     -- the upgrade whose card is under the mouse
-  }
-end
-
 -- Items per minute, as the game states every rate.
 local function perMin(seconds)
   return num(floor(600 / seconds + 0.5) / 10) .. '/MIN'
@@ -58,9 +52,69 @@ local function pct(u)
   return floor(u * 100 + 0.5) .. '%'
 end
 
-local function cellAt(x, y)
-  if x < BX or y < BY or x >= BX + Factory.W * T or y >= BY + Factory.H * T then return nil end
-  return floor((x - BX) / T), floor((y - BY) / T)
+---------------------------------------------------------------- camera
+
+local function clampCam(cam)
+  cam.x = max(0, min(Map.W * cam.T - VW, floor(cam.x + 0.5)))
+  cam.y = max(0, min(Map.H * cam.T - VH, floor(cam.y + 0.5)))
+end
+
+-- Switch to tile size T with tile position (fx, fy) in the middle.
+local function setZoom(g, T, fx, fy)
+  local cam = g.cam
+  cam.T = T
+  cam.x, cam.y = fx * T - VW / 2, fy * T - VH / 2
+  clampCam(cam)
+end
+
+-- Top-left pixel of a tile on the canvas.
+local function tilePos(g, cx, cy)
+  local cam = g.cam
+  return VX + cx * cam.T - cam.x, VY + cy * cam.T - cam.y
+end
+
+-- The tile under a canvas position, or nil outside the viewport.
+local function cellAt(g, x, y)
+  if x < VX or y < VY or x >= VX + VW or y >= VY + VH then return nil end
+  local cam = g.cam
+  local cx, cy = floor((x - VX + cam.x) / cam.T), floor((y - VY + cam.y) / cam.T)
+  if cx < 0 or cy < 0 or cx >= Map.W or cy >= Map.H then return nil end
+  return cx, cy
+end
+
+-- Middle of the depot, in tiles.
+local function depotCentre(run)
+  local d = run.map.depot
+  return (d[1][1] + d[4][1] + 1) / 2, (d[1][2] + d[4][2] + 1) / 2
+end
+
+function Game.enter(app)
+  local old, run = app.g, app.run
+  local g = {
+    mode = 'intro', tool = nil, dir = 0, speed = old and old.speed or 1,
+    acc = 0, frac = 0, paused = false,
+    popups = {}, summary = nil, drag = nil, book = false,
+    stats = old and old.stats or false,   -- U: utilisation on every machine
+    fx = Fx.new(),      -- card pops and tile flashes
+    reveal = nil,       -- summary playback, see finishShift
+    lit = {},           -- mods changing a machine on the board this frame
+    hoverMod = nil,     -- the upgrade whose card is under the mouse
+    sel = nil,          -- selected rectangle of tiles { x1, y1, x2, y2 }
+    clip = nil,         -- what the stamp tool pastes: { w, h, items = { ... } }
+    cam = old and old.run == run and old.cam or nil,
+    run = run,
+  }
+  app.g = g
+  if not g.cam then
+    g.cam = { T = 16, x = 0, y = 0 }
+    setZoom(g, 16, depotCentre(run))
+  end
+  if run.pendingPlot then
+    -- New land is placed on the overview.
+    g.mode = 'annex'
+    g.back = { T = g.cam.T, x = g.cam.x, y = g.cam.y }
+    setZoom(g, 8, 0, 0)
+  end
 end
 
 ---------------------------------------------------------------- tooltips
@@ -90,7 +144,13 @@ local function entityTip(app, e)
       floor(app.run.rules.shiftLen / e.port.period) .. ' PER SHIFT' }
     if live then tip.lines[2] = 'SENT ' .. e.port.sent end
   elseif e.export then
-    if live then tip.lines[2] = 'SOLD ' .. e.export.sold end
+    if live then tip.lines[#tip.lines + 1] = 'SOLD ' .. e.export.sold end
+    for d = 0, 3 do
+      if e.export.premium[d] then
+        tip.lines[#tip.lines + 1] = 'PREMIUM FACE: ITEMS HEADING ' .. D.NAME[d] ..
+          ' INTO IT SELL FOR X' .. num(e.export.premium[d])
+      end
+    end
   elseif e.machine and live then
     local m = e.machine
     tip.lines = { (m.def.generator and 'BURNED ' or 'MADE ') .. m.made, STATUS[m.status] }
@@ -98,7 +158,7 @@ local function entityTip(app, e)
     local u = F:utilisation(e)
     if u then tip.lines[#tip.lines + 1] = 'BUSY ' .. pct(u) .. ' OF THE SHIFT' end
   elseif e.machine then
-    local sp = app.run.rules:speed(F, e)
+    local sp = app.run.rules:speed(F, e) * F:padSpeed(e)
     if e.machine.def.time and sp ~= 1 then
       tip.lines[#tip.lines] = perMin(e.machine.def.time / sp) .. ', ' .. e.machine.def.draw .. 'W'
       tip.lines[#tip.lines + 1] = 'SPEED X' .. num(sp)
@@ -112,69 +172,129 @@ local function entityTip(app, e)
   return tip
 end
 
-local function defaultTip(app)
-  local mode = app.g.mode
-  if mode == 'run' then
-    return { title = 'SHIFT RUNNING', color = P.green,
-      lines = { 'SPACE PAUSES.', 'HOVER A MACHINE TO SEE WHAT IT IS DOING.' } }
-  elseif mode == 'summary' then
-    return { title = 'SHIFT OVER', color = P.text,
-      lines = { 'YOU CAN REBUILD BEFORE THE NEXT SHIFT.' } }
-  elseif mode == 'over' or mode == 'win' then
-    return { title = 'RUN ENDED', color = P.text, lines = {} }
+-- Words for a plot: what it brings.
+local function plotLines(plot)
+  local lines = {}
+  for _, p in ipairs(plot.ports) do
+    lines[#lines + 1] = Items[p.item].name .. ' ' .. perMin(p.period)
   end
-  return { title = 'BUILD', color = P.text,
-    lines = { 'LEFT CLICK: PLACE, DRAG BELTS, PICK UP.', 'RIGHT CLICK: REMOVE.',
-      'R: ROTATE. TAB: RECIPES. U: HOW BUSY EACH MACHINE WAS.' } }
+  if plot.special then lines[#lines + 1] = Map.SPECIAL_TEXT[plot.special] end
+  return lines
 end
 
 ---------------------------------------------------------------- editing
 
-local function placeAt(app, kind, x, y, dir)
-  local run, F = app.run, app.run.factory
-  local e = F:at(x, y)
-  if e then
-    if e.building.fixed then return false end
-    if e.building.kind == kind then
-      e.building.dir = dir
-      return true
-    end
-    if kind == 'belt' or not e.belt then return false end
-    if not run:unlocked(kind) then return false end
-    F:remove(x, y)                       -- a machine may replace a belt
-  elseif not run:unlocked(kind) then
-    return false
-  end
-  F:place(kind, x, y, dir)
-  return true
+-- Can `kind` go on this tile? Only on your own land, never over a fixed
+-- piece; a machine may replace a belt.
+local function canPlace(app, kind, x, y)
+  local run = app.run
+  if not run:canBuild(x, y) or not run:unlocked(kind) then return false end
+  local e = run.factory:at(x, y)
+  if not e then return true end
+  if e.building.fixed then return false end
+  return e.building.kind == kind or (e.belt and kind ~= 'belt')
 end
 
-local function clearBoard(app)
+local function placeAt(app, kind, x, y, dir)
+  if not canPlace(app, kind, x, y) then return false end
   local F = app.run.factory
-  for y = 0, Factory.H - 1 do
-    for x = 0, Factory.W - 1 do F:remove(x, y) end
+  local e = F:at(x, y)
+  if e and e.building.kind == kind then
+    e.building.dir = dir
+    return true
   end
+  if e then F:remove(x, y) end
+  F:place(kind, x, y, dir)
+  return true
 end
 
 local function rotate(app, step)
   local g = app.g
   if g.mode ~= 'build' then return end
-  if g.tool then
+  if g.tool == 'stamp' then
+    -- Turn the whole stamp a quarter clockwise.
+    local clip = g.clip
+    for _ = 1, step % 4 do
+      for _, it in ipairs(clip.items) do
+        it.dx, it.dy = clip.h - 1 - it.dy, it.dx
+        it.dir = (it.dir + 1) % 4
+      end
+      clip.w, clip.h = clip.h, clip.w
+    end
+    return
+  end
+  if g.tool and g.tool ~= 'select' then
     g.dir = (g.dir + step) % 4
     return
   end
-  local cx, cy = cellAt(UI.mx, UI.my)
+  local cx, cy = cellAt(g, UI.mx, UI.my)
   local e = cx and app.run.factory:at(cx, cy)
   if e and not e.building.fixed then
     e.building.dir = (e.building.dir + step) % 4
   end
 end
 
+-- Selection: copy the pieces in the rectangle onto the stamp (and remove
+-- them, for a cut). Fixed pieces stay where they are.
+local function copySelection(app, cut)
+  local g, F = app.g, app.run.factory
+  local sel = g.sel
+  if not sel then return false end
+  local clip = { w = sel.x2 - sel.x1 + 1, h = sel.y2 - sel.y1 + 1, items = {} }
+  for y = sel.y1, sel.y2 do
+    for x = sel.x1, sel.x2 do
+      local e = F:at(x, y)
+      if e and not e.building.fixed then
+        clip.items[#clip.items + 1] = { dx = x - sel.x1, dy = y - sel.y1, kind = e.building.kind, dir = e.building.dir }
+        if cut then F:remove(x, y) end
+      end
+    end
+  end
+  if #clip.items == 0 then return false end
+  g.clip, g.tool, g.sel = clip, 'stamp', nil
+  return true
+end
+
+local function deleteSelection(app)
+  local g, F = app.g, app.run.factory
+  local sel = g.sel
+  if not sel then return end
+  for y = sel.y1, sel.y2 do
+    for x = sel.x1, sel.x2 do F:remove(x, y) end
+  end
+  g.sel = nil
+end
+
+-- Would the stamp fit with its top-left corner on (cx, cy)? Every piece
+-- needs a tile of your land that holds nothing fixed.
+local function stampFits(app, cx, cy)
+  local run = app.run
+  for _, it in ipairs(app.g.clip.items) do
+    local x, y = cx + it.dx, cy + it.dy
+    local e = run.factory:at(x, y)
+    if not run:canBuild(x, y) or (e and e.building.fixed) then return false end
+  end
+  return true
+end
+
+local function pasteStamp(app, cx, cy)
+  if not stampFits(app, cx, cy) then return false end
+  local run, F = app.run, app.run.factory
+  for _, it in ipairs(app.g.clip.items) do
+    local x, y = cx + it.dx, cy + it.dy
+    if run:unlocked(it.kind) then
+      if F:at(x, y) then F:remove(x, y) end
+      F:place(it.kind, x, y, it.dir)
+    end
+  end
+  return true
+end
+
 ---------------------------------------------------------------- shift control
 
 local function startShift(app)
   local g = app.g
-  g.tool, g.drag = nil, nil
+  g.tool, g.drag, g.sel = nil, nil, nil
   app.run:beginShift()
   g.mode, g.acc, g.frac, g.paused, g.popups = 'run', 0, 0, false, {}
   g.fx = Fx.new()
@@ -293,70 +413,156 @@ function Game.update(app, dt)
     p.age = p.age + dt
     if p.age > POPUP_LIFE then table.remove(g.popups, i) end
   end
+  -- The camera follows held keys (close view only; the overview shows it all).
+  if love.keyboard and not g.book and g.mode ~= 'annex' then
+    local down = love.keyboard.isDown
+    local dx = ((down('d') or down('right')) and 1 or 0) - ((down('a') or down('left')) and 1 or 0)
+    local dy = ((down('s') or down('down')) and 1 or 0) - ((down('w') or down('up')) and 1 or 0)
+    if dx ~= 0 or dy ~= 0 then Game.pan(app, dx * PAN * dt, dy * PAN * dt) end
+  end
+end
+
+-- Move the camera by a number of pixels.
+function Game.pan(app, dx, dy)
+  local cam = app.g.cam
+  cam.fx, cam.fy = (cam.fx or 0) + dx, (cam.fy or 0) + dy   -- keep the fractions
+  local ix, iy = floor(cam.fx), floor(cam.fy)
+  cam.fx, cam.fy = cam.fx - ix, cam.fy - iy
+  cam.x, cam.y = cam.x + ix, cam.y + iy
+  clampCam(cam)
 end
 
 ---------------------------------------------------------------- drawing: board
 
-local function nub(x, y, dir, c, a)
+-- A mark on the edge of a tile: where a machine or port puts its items out.
+local function nub(x, y, dir, c, a, T)
   UI.color(c, a)
-  if dir == 0 then love.graphics.rectangle('fill', x + 14, y + 6, 2, 4)
-  elseif dir == 1 then love.graphics.rectangle('fill', x + 6, y + 14, 4, 2)
-  elseif dir == 2 then love.graphics.rectangle('fill', x, y + 6, 2, 4)
-  else love.graphics.rectangle('fill', x + 6, y, 4, 2) end
+  if T == 16 then
+    if dir == 0 then love.graphics.rectangle('fill', x + 14, y + 6, 2, 4)
+    elseif dir == 1 then love.graphics.rectangle('fill', x + 6, y + 14, 4, 2)
+    elseif dir == 2 then love.graphics.rectangle('fill', x, y + 6, 2, 4)
+    else love.graphics.rectangle('fill', x + 6, y, 4, 2) end
+  else
+    if dir == 0 then love.graphics.rectangle('fill', x + 7, y + 3, 1, 2)
+    elseif dir == 1 then love.graphics.rectangle('fill', x + 3, y + 7, 2, 1)
+    elseif dir == 2 then love.graphics.rectangle('fill', x, y + 3, 1, 2)
+    else love.graphics.rectangle('fill', x + 3, y, 2, 1) end
+  end
 end
 
 local STATUS_COLOR = { work = P.green, idle = P.faint, blocked = P.yellow }
 
 -- A belt takes its shape from what feeds it: a lone side feed makes a
 -- rounded corner, any other side feed opens the rail on that side.
-local function drawBelt(F, e, x, y, frame)
+local function drawBelt(S, F, e, x, y, frame)
   local dir = e.building.dir
   local shape = Links.beltShape(F, e)
   if shape.corner then
-    UI.sprite(Sprites.corner[frame], x, y, dir, 1, shape.corner == 'right')
+    UI.sprite(S.corner[frame], x, y, dir, 1, shape.corner == 'right')
     return
   end
-  UI.sprite(Sprites.belt[frame], x, y, dir)
-  if shape.left then UI.sprite(Sprites.inlet, x, y, dir) end
-  if shape.right then UI.sprite(Sprites.inlet, x, y, dir, 1, true) end
+  UI.sprite(S.belt[frame], x, y, dir)
+  if shape.left then UI.sprite(S.inlet, x, y, dir) end
+  if shape.right then UI.sprite(S.inlet, x, y, dir, 1, true) end
 end
 
-local function drawBuilding(e, x, y, live, beltFrame, alpha)
-  local b = e.building
+-- Any piece other than a belt in a line. `b` = { kind, dir }.
+local function drawPiece(S, T, b, x, y, alpha, item, hasOutput)
   local kind = b.kind
   if kind == 'belt' then
-    UI.sprite(Sprites.belt[beltFrame], x, y, b.dir, alpha)
+    UI.sprite(S.belt[1], x, y, b.dir, alpha)
     return
   end
-  UI.sprite(Sprites.machine[kind], x, y, Sprites.rotates[kind] and b.dir or 0, alpha)
-  if e.port then
-    UI.sprite(Sprites.item[e.port.item], x + 4, y + 4, 0, alpha)
-    nub(x, y, b.dir, P.yellow, alpha)
-  elseif e.machine then
-    if e.slot then nub(x, y, b.dir, P.yellow, alpha) end
-    if live then
-      local m = e.machine
-      UI.rect(x + 11, y + 2, 2, 2, STATUS_COLOR[m.status] or P.faint)
-      if m.craft then
-        UI.rect(x + 3, y + 12, 10, 1, P.dark)
-        UI.rect(x + 3, y + 12, floor(10 * min(1, m.craft.p / m.def.time)), 1, P.white)
-      elseif m.def.generator and m.burn > 0 then
-        UI.rect(x + 3, y + 12, 10, 1, P.dark)
-        UI.rect(x + 3, y + 12, floor(10 * m.burn / m.def.generator.burn), 1, P.orange)
-      end
+  UI.sprite(S.machine[kind], x, y, Sprites.rotates[kind] and b.dir or 0, alpha)
+  if item then UI.sprite(S.item[item], x + T / 4, y + T / 4, 0, alpha) end
+  if hasOutput then nub(x, y, b.dir, P.yellow, alpha, T) end
+end
+
+local function drawBuilding(S, T, e, x, y, live)
+  local b = e.building
+  drawPiece(S, T, b, x, y, 1, e.port and e.port.item, e.port or (e.machine and e.slot))
+  if e.export then
+    -- A premium face: gold on the edge the items come in through.
+    for d = 0, 3 do
+      if e.export.premium[d] then nub(x, y, (d + 2) % 4, P.gold, 1, T) end
     end
+  elseif e.machine and live then
+    local m = e.machine
+    local big = T == 16
+    if big then
+      UI.rect(x + 11, y + 2, 2, 2, STATUS_COLOR[m.status] or P.faint)
+    else
+      UI.rect(x + 6, y + 1, 1, 1, STATUS_COLOR[m.status] or P.faint)
+    end
+    local bx, by, bw = x + (big and 3 or 1), y + (big and 12 or 6), big and 10 or 6
+    if m.craft then
+      UI.rect(bx, by, bw, 1, P.dark)
+      UI.rect(bx, by, floor(bw * min(1, m.craft.p / m.def.time)), 1, P.white)
+    elseif m.def.generator and m.burn > 0 then
+      UI.rect(bx, by, bw, 1, P.dark)
+      UI.rect(bx, by, floor(bw * m.burn / m.def.generator.burn), 1, P.orange)
+    end
+  end
+end
+
+-- A plot's fixed pieces, drawn at plot slot (sx, sy): the preview of land
+-- that is on offer.
+local function drawPlot(g, S, T, plot, sx, sy, alpha)
+  local ox, oy = tilePos(g, sx * Map.PW, sy * Map.PH)
+  for y = 0, Map.PH - 1 do
+    for x = 0, Map.PW - 1 do UI.sprite(S.floor, ox + x * T, oy + y * T, 0, alpha) end
+  end
+  for _, p in ipairs(plot.pads or {}) do UI.sprite(S.pad, ox + p.x * T, oy + p.y * T, 0, alpha) end
+  for _, r in ipairs(plot.rocks) do UI.sprite(S.machine.rock, ox + r.x * T, oy + r.y * T, 0, alpha) end
+  if plot.node then UI.sprite(S.machine.node, ox + plot.node.x * T, oy + plot.node.y * T, 0, alpha) end
+  for _, p in ipairs(plot.ports) do
+    drawPiece(S, T, { kind = 'port', dir = p.dir }, ox + p.x * T, oy + p.y * T, alpha, p.item, true)
   end
 end
 
 local function drawBoard(app)
   local g, run = app.g, app.run
-  local F = run.factory
+  local F, map = run.factory, run.map
   local world = F.world
   local live = g.mode == 'run' or g.mode == 'summary'
+  local cam = g.cam
+  local T = cam.T
+  local S = Sprites.set[T]
+  local big = T == 16
 
-  for y = 0, Factory.H - 1 do
-    for x = 0, Factory.W - 1 do
-      UI.sprite(Sprites.floor, BX + x * T, BY + y * T)
+  love.graphics.setScissor(VX, VY, VW, VH)
+
+  -- Visible tiles.
+  local x0, y0 = floor(cam.x / T), floor(cam.y / T)
+  local x1, y1 = min(Map.W - 1, floor((cam.x + VW - 1) / T)), min(Map.H - 1, floor((cam.y + VH - 1) / T))
+  local function visible(e)
+    return e.pos.x >= x0 and e.pos.x <= x1 and e.pos.y >= y0 and e.pos.y <= y1
+  end
+
+  for y = y0, y1 do
+    for x = x0, x1 do
+      local px, py = tilePos(g, x, y)
+      if not map:owned(x, y) then
+        UI.sprite(S.locked, px, py)
+      elseif F:floorAt(x, y) == 'pad' then
+        UI.sprite(S.pad, px, py)
+      else
+        UI.sprite(S.floor, px, py)
+      end
+    end
+  end
+
+  -- The edge of your land.
+  for sy = 0, Map.ROWS - 1 do
+    for sx = 0, Map.COLS - 1 do
+      if map:has(sx, sy) then
+        local px, py = tilePos(g, sx * Map.PW, sy * Map.PH)
+        local w, h = Map.PW * T, Map.PH * T
+        if not map:has(sx - 1, sy) then UI.rect(px - 1, py - 1, 1, h + 1, P.line) end
+        if not map:has(sx + 1, sy) then UI.rect(px + w - 1, py - 1, 1, h + 1, P.line) end
+        if not map:has(sx, sy - 1) then UI.rect(px - 1, py - 1, w + 1, 1, P.line) end
+        if not map:has(sx, sy + 1) then UI.rect(px - 1, py + h - 1, w + 1, 1, P.line) end
+      end
     end
   end
 
@@ -367,10 +573,13 @@ local function drawBoard(app)
   local buildings = world:query('building')
   for i = 1, #buildings do
     local e = buildings[i]
-    if e.belt then
-      drawBelt(F, e, BX + e.pos.x * T, BY + e.pos.y * T, beltFrame)
-    elseif e.bridge or e.splitter then
-      drawBuilding(e, BX + e.pos.x * T, BY + e.pos.y * T, live, beltFrame)
+    if visible(e) then
+      local px, py = tilePos(g, e.pos.x, e.pos.y)
+      if e.belt then
+        drawBelt(S, F, e, px, py, beltFrame)
+      elseif e.bridge or e.splitter then
+        drawBuilding(S, T, e, px, py, live)
+      end
     end
   end
 
@@ -378,17 +587,24 @@ local function drawBoard(app)
   if live then
     local items = world:query('item')
     local f = g.frac
+    local off = T / 4
     for i = 1, #items do
       local it = items[i]
       if not it.hidden then
-        local x = BX + (it.prev.x + (it.pos.x - it.prev.x) * f) * T + 4
-        local y = BY + (it.prev.y + (it.pos.y - it.prev.y) * f) * T + 4
+        local x = VX + (it.prev.x + (it.pos.x - it.prev.x) * f) * T + off - cam.x
+        local y = VY + (it.prev.y + (it.pos.y - it.prev.y) * f) * T + off - cam.y
         x, y = floor(x + 0.5), floor(y + 0.5)
-        UI.sprite(Sprites.item[it.item.type], x, y)
-        if it.item.polished > 0 then
-          local blink = floor(app.time * 6 + it.id) % 3
-          UI.rect(x + 6, y + blink, 1, 1, P.white)
-          if it.item.polished > 1 then UI.rect(x + 1, y + 6 - blink, 1, 1, P.white) end
+        if x > VX - T and x < VX + VW and y > VY - T and y < VY + VH then
+          UI.sprite(S.item[it.item.type], x, y)
+          if it.item.polished > 0 then
+            if big then
+              local blink = floor(app.time * 6 + it.id) % 3
+              UI.rect(x + 6, y + blink, 1, 1, P.white)
+              if it.item.polished > 1 then UI.rect(x + 1, y + 6 - blink, 1, 1, P.white) end
+            else
+              UI.rect(x + 3, y, 1, 1, P.white)
+            end
+          end
         end
       end
     end
@@ -397,8 +613,9 @@ local function drawBoard(app)
   -- Things items disappear into.
   for i = 1, #buildings do
     local e = buildings[i]
-    if not (e.belt or e.bridge or e.splitter) then
-      drawBuilding(e, BX + e.pos.x * T, BY + e.pos.y * T, live, beltFrame)
+    if not (e.belt or e.bridge or e.splitter) and visible(e) then
+      local px, py = tilePos(g, e.pos.x, e.pos.y)
+      drawBuilding(S, T, e, px, py, live)
     end
   end
 
@@ -410,12 +627,13 @@ local function drawBoard(app)
     local e = buildings[i]
     local mods = e.machine and run.rules:affecting(F, e)
     if mods then
-      local x, y = BX + e.pos.x * T, BY + e.pos.y * T
-      UI.rect(x, y, #mods * 3 + 1, 4, P.dark)
+      local x, y = tilePos(g, e.pos.x, e.pos.y)
+      local step = big and 3 or 2
+      UI.rect(x, y, #mods * step + 1, big and 4 or 3, P.dark)
       for k = 1, #mods do
         local m = mods[k]
         g.lit[m] = true
-        UI.rect(x + 1 + (k - 1) * 3, y + 1, 2, 2, Fx.color(m))
+        UI.rect(x + 1 + (k - 1) * step, y + 1, step - 1, step - 1, Fx.color(m))
         if m == g.hoverMod then UI.frame(x, y, T, T, Fx.color(m)) end
       end
     end
@@ -425,37 +643,78 @@ local function drawBoard(app)
   if g.stats then
     for i = 1, #buildings do
       local e = buildings[i]
-      local u = e.machine and F:utilisation(e)
+      local u = e.machine and visible(e) and F:utilisation(e)
       if u then
-        local label = tostring(floor(u * 100 + 0.5))
-        local x, y = BX + e.pos.x * T, BY + e.pos.y * T
+        local n = floor(u * 100 + 0.5)
+        local label = tostring(big and n or min(n, 99))
+        local x, y = tilePos(g, e.pos.x, e.pos.y)
         local w = Font.width(label)
-        UI.rect(x + 15 - w - 2, y + 8, w + 2, 7, P.dark)
-        UI.text(label, x + 15 - w - 1, y + 9,
-          u >= Factory.BUSY and P.green or (u >= 0.5 and P.yellow or P.red))
+        local color = u >= Factory.BUSY and P.green or (u >= 0.5 and P.yellow or P.red)
+        if big then
+          UI.rect(x + 15 - w - 2, y + 8, w + 2, 7, P.dark)
+          UI.text(label, x + 15 - w - 1, y + 9, color)
+        else
+          UI.rect(x, y + 1, 8, 7, P.dark)
+          UI.text(label, x + 8 - w, y + 2, color)
+        end
       end
     end
   end
 
-  Fx.drawFlashes(g.fx, BX, BY, T)
+  Fx.drawFlashes(g.fx, VX - cam.x, VY - cam.y, T)
+
+  local overlay = g.mode == 'intro' or g.mode == 'summary' or g.mode == 'over' or g.mode == 'win' or g.book
+  local cx, cy = cellAt(g, UI.mx, UI.my)
+
+  if g.mode == 'annex' then
+    -- Free slots, and the plot on offer under the mouse.
+    local plot = run.pendingPlot
+    local hsx, hsy
+    if cx then hsx, hsy = Map.slotOf(cx, cy) end
+    for _, s in ipairs(map:free()) do
+      local px, py = tilePos(g, s[1] * Map.PW, s[2] * Map.PH)
+      local w, h = Map.PW * T, Map.PH * T
+      if s[1] == hsx and s[2] == hsy then
+        drawPlot(g, S, T, plot, s[1], s[2], 1)
+        UI.frame(px, py, w, h, P.white)
+      else
+        UI.rect(px + 1, py + 1, w - 2, h - 2, P.cyanD, 0.25)
+        UI.frame(px, py, w, h, P.cyan, 0.8)
+      end
+    end
+  end
+
+  -- The selection.
+  if g.sel and g.mode == 'build' then
+    local sel = g.sel
+    local px, py = tilePos(g, sel.x1, sel.y1)
+    UI.rect(px, py, (sel.x2 - sel.x1 + 1) * T, (sel.y2 - sel.y1 + 1) * T, P.yellow, 0.12)
+    UI.frame(px, py, (sel.x2 - sel.x1 + 1) * T, (sel.y2 - sel.y1 + 1) * T, P.yellow)
+  end
 
   -- Hover, ghost and tooltip.
-  local overlay = g.mode == 'intro' or g.mode == 'summary' or g.mode == 'over' or g.mode == 'win' or g.book
-  local cx, cy = cellAt(UI.mx, UI.my)
-  if cx and not overlay then
-    local x, y = BX + cx * T, BY + cy * T
+  if cx and not overlay and g.mode ~= 'annex' then
+    local x, y = tilePos(g, cx, cy)
     local e = F:at(cx, cy)
-    if e then UI.tip = entityTip(app, e) end
-    if g.mode == 'build' and g.tool then
-      local ok = not e
-        or (e and not e.building.fixed and (e.building.kind == g.tool or (e.belt and g.tool ~= 'belt')))
-      local ghost = { building = { kind = g.tool, dir = g.dir }, slot = not Machines[g.tool].generator }
-      if g.tool == 'belt' or g.tool == 'splitter' or g.tool == 'bridge' then
-        UI.sprite(Sprites.machine[g.tool], x, y, Sprites.rotates[g.tool] and g.dir or 0, 0.7)
-      else
-        UI.sprite(Sprites.machine[g.tool], x, y, 0, 0.7)
-        if ghost.slot then nub(x, y, g.dir, P.yellow, 0.9) end
+    if e then
+      UI.tip = entityTip(app, e)
+    elseif not map:owned(cx, cy) then
+      UI.tip = { title = 'NOT YOUR LAND', color = P.faint, lines = { 'EVERY CONTRACT ADDS A PLOT.' } }
+    elseif F:floorAt(cx, cy) == 'pad' then
+      UI.tip = { title = 'BOOSTER PAD', color = P.cyan, lines = { 'A MACHINE HERE RUNS 50% FASTER.' } }
+    end
+    if g.mode == 'build' and g.tool == 'stamp' then
+      local ok = stampFits(app, cx, cy)
+      for _, it in ipairs(g.clip.items) do
+        local px, py = x + it.dx * T, y + it.dy * T
+        local def = Machines[it.kind]
+        drawPiece(S, T, it, px, py, 0.6, nil, def.time ~= nil)
       end
+      UI.frame(x, y, g.clip.w * T, g.clip.h * T, ok and P.white or P.red, 0.8)
+    elseif g.mode == 'build' and g.tool and g.tool ~= 'select' then
+      local ok = canPlace(app, g.tool, cx, cy)
+      local def = Machines[g.tool]
+      drawPiece(S, T, { kind = g.tool, dir = g.dir }, x, y, 0.7, nil, def.time ~= nil)
       UI.frame(x, y, T, T, ok and P.white or P.red, 0.8)
     else
       UI.frame(x, y, T, T, P.white, 0.35)
@@ -467,14 +726,17 @@ local function drawBoard(app)
   for _, p in ipairs(g.popups) do
     local label, color = '+$' .. p.value, p.color or P.green
     if p.value == 0 then label, color = '$0', P.red end
-    local x = BX + p.x * T + 8 - Font.width(label) / 2
-    x = min(x, SX - Font.width(label) - 2)
+    local px, py = tilePos(g, p.x, p.y)
+    local x = px + T / 2 - Font.width(label) / 2
+    x = max(VX + 1, min(x, VX + VW - Font.width(label) - 2))
     -- They rise, or sink where the top bar would swallow them.
-    local y = BY + p.y * T - 6 - p.age * POPUP_RISE
-    if p.y < 2 then y = BY + (p.y + 1) * T + 1 + p.age * POPUP_RISE end
+    local y = py - 6 - p.age * POPUP_RISE
+    if py - VY < 2 * T then y = py + T + 1 + p.age * POPUP_RISE end
     UI.text(label, x + 1, y + 1, P.dark)
     UI.text(label, x, y, color)
   end
+
+  love.graphics.setScissor()
 end
 
 ---------------------------------------------------------------- drawing: top bar
@@ -484,55 +746,58 @@ local function drawTopBar(app)
   local F = run.factory
   local c = run:contract()
   local rules = run.rules
-  UI.rect(0, 0, SX, BY, P.panel)
-  UI.rect(0, BY - 1, SX, 1, P.line)
+  UI.rect(0, 0, 320, VY, P.panel)
+  UI.rect(0, VY - 1, 320, 1, P.line)
 
   local label = 'CONTRACT ' .. c.index .. '/' .. run:total()
-  UI.text(label, 3, 3, P.text)
+  UI.text(label, 3, 2, P.text)
   if c.boss then
     -- The boss has no card: its label takes the hit when its twist bites.
     local text, bx = 'BOSS: ' .. c.boss.name, 3 + Font.width(label) + 8
     local pop = Fx.popOf(g.fx, c.boss)
     if pop > 0 then
       bx = bx + Fx.shake(pop)
-      UI.rect(bx - 2, 2, Font.width(text) + 4, 7, P.red)
+      UI.rect(bx - 2, 1, Font.width(text) + 4, 7, P.red)
     end
-    UI.text(text, bx, 3, pop > 0 and P.dark or P.red)
-    if UI.inside(0, 0, SX, 9) then
+    UI.text(text, bx, 2, pop > 0 and P.dark or P.red)
+    if UI.inside(0, 0, 200, 8) then
       UI.tip = { title = c.boss.name, color = P.red, lines = { c.boss.desc } }
     end
   end
+  UI.textRight('$' .. run.credits, 286, 2, P.gold)
+  if UI.inside(250, 0, 38, 8) then
+    UI.tip = { title = 'CREDITS', color = P.gold, lines = { 'SPENT IN THE SHOP BETWEEN CONTRACTS.' } }
+  end
+  if UI.button('MENU', 291, 0, 27, 8) then app.openPause() end
 
-  local building = g.mode == 'build' or g.mode == 'intro'
-  local shiftNo = min(rules.shifts, run.shiftsUsed + (building and 1 or 0))
-  UI.textRight('SHIFT ' .. shiftNo .. '/' .. rules.shifts, SX - 4, 3, P.dim)
-
+  local live = g.mode == 'run' or g.mode == 'summary'
   local earned = run.progress + ((g.mode == 'run') and F.shift.revenue or 0)
   if g.mode == 'summary' then   -- no spoilers while the summary plays out
     earned = earned - g.summary.total + revealedTotal(g)
   end
-  local bw = 112
-  UI.rect(3, 11, bw, 6, P.bg)
-  UI.rect(3, 11, floor(bw * min(1, earned / c.quota)), 6, earned >= c.quota and P.green or P.gold)
-  UI.frame(3, 11, bw, 6, P.line)
-  UI.text('$' .. earned .. '/' .. c.quota, 3 + bw + 4, 11, earned >= c.quota and P.green or P.text)
+  local bw = 96
+  UI.rect(3, 9, bw, 5, P.bg)
+  UI.rect(3, 9, floor(bw * min(1, earned / c.quota)), 5, earned >= c.quota and P.green or P.gold)
+  UI.frame(3, 9, bw, 5, P.line)
+  UI.text('$' .. earned .. '/' .. c.quota, 3 + bw + 4, 9, earned >= c.quota and P.green or P.text)
 
-  local live = g.mode == 'run' or g.mode == 'summary'
   local tick = live and F.shift.tick or 0
-  local clock = tick .. '/' .. rules.shiftLen .. 'S'
-  UI.textRight(clock, SX - 4, 11, g.mode == 'run' and P.text or P.dim)
+  UI.textRight(tick .. '/' .. rules.shiftLen .. 'S', 316, 9, g.mode == 'run' and P.text or P.dim)
+  local building = not live
+  local shiftNo = min(rules.shifts, run.shiftsUsed + (building and 1 or 0))
+  UI.textRight('SHIFT ' .. shiftNo .. '/' .. rules.shifts, 284, 9, P.dim)
   -- What the factory is earning per second, as measured so far.
   if live and tick > 0 then
     local rate = F.shift.revenue / tick
-    UI.textRight('$' .. num(floor(rate * 10 + 0.5) / 10) .. '/S', SX - 8 - Font.width(clock), 11, P.gold)
+    UI.textRight('$' .. num(floor(rate * 10 + 0.5) / 10) .. '/S', 240, 9, P.gold)
   end
 end
 
 ---------------------------------------------------------------- drawing: sidebar
 
--- The shift ledger: what each upgrade (in slot order) and the boss did this
--- shift, as { mod, delta, n }. Nil if there is nobody to list. End-of-shift
--- credit stays out until the summary has revealed it.
+-- The shift ledger: what each upgrade (in slot order), the site's own rules
+-- and the boss did this shift, as { mod, delta, n }. Nil if there is nobody
+-- to list. End-of-shift credit stays out until the summary has revealed it.
 local function ledgerRows(app)
   local g, run = app.g, app.run
   local ledger = run.factory.shift.ledger
@@ -551,20 +816,27 @@ local function ledgerRows(app)
     rows[#rows + 1] = { mod = mod, delta = rec.delta - (held or 0), n = rec.n - (held and 1 or 0) }
   end
   for _, id in ipairs(run.upgrades) do add(Upgrades.byId[id]) end
+  add(Contracts.premium)
   local boss = run:contract().boss
   if boss then add(boss) end
   return #rows > 0 and rows or nil
 end
 
+local HINTS = {
+  annex = { 'CLICK A FREE', 'PLOT TO PLACE', 'YOUR NEW LAND.' },
+  build = { 'LMB PLACE', 'RMB REMOVE', 'R   ROTATE', 'V   SELECT', 'WHEEL ZOOM', 'WASD MOVE', 'TAB RECIPES', 'U   BUSY %' },
+  select = { 'DRAG A BOX', 'C   COPY', 'X   CUT', 'DEL REMOVE', 'Q   CANCEL' },
+  stamp = { 'LMB PASTE', 'R   ROTATE', 'Q   DONE' },
+  run = { 'SPACE PAUSE', '1 2 3 SPEED', 'HOVER A', 'MACHINE TO', 'SEE HOW BUSY', 'IT IS.' },
+}
+
 local function drawSidebar(app)
   local g, run = app.g, app.run
   local F = run.factory
   local rules = run.rules
-  UI.rect(SX, 0, 96, 180, P.panel)
-  UI.rect(SX, 0, 1, 180, P.line)
-
-  UI.text('$' .. run.credits, SX + 4, 3, P.gold)
-  if UI.button('MENU', 291, 1, 27, 9) then app.openPause() end
+  UI.rect(SX, VY, SW, 180 - VY, P.panel)
+  UI.rect(SX, VY, 1, 180 - VY, P.line)
+  local x0, w = SX + 3, SW - 6
 
   -- Power.
   local live = g.mode == 'run' or g.mode == 'summary'
@@ -575,39 +847,21 @@ local function drawSidebar(app)
     supply, demand = rules.basePower, F:plannedDraw(rules)
   end
   local over = demand > supply
-  UI.text('POWER ' .. num(demand) .. '/' .. num(supply) .. 'W', SX + 4, 11, over and P.red or P.blue)
-  UI.rect(SX + 4, 18, 88, 2, P.bg)
-  UI.rect(SX + 4, 18, floor(88 * min(1, demand / max(supply, 1))), 2, over and P.red or P.blue)
-  if UI.inside(SX, 9, 96, 13) then
+  UI.text('POWER', x0, 19, P.dim)
+  UI.textRight(num(demand) .. '/' .. num(supply) .. 'W', SX + SW - 3, 19, over and P.red or P.blue)
+  UI.rect(x0, 26, w, 2, P.bg)
+  UI.rect(x0, 26, floor(w * min(1, demand / max(supply, 1))), 2, over and P.red or P.blue)
+  if UI.inside(SX, VY, SW, 13) then
     UI.tip = { title = 'POWER', color = P.blue, lines = {
-      'DEMAND / SUPPLY. OVER THE LIMIT, EVERY MACHINE SLOWS DOWN IN PROPORTION.' } }
-  end
-
-  -- Palette: every kind the run can build, as many of each as you like.
-  local entries = run:palette()
-  g.entries = entries
-  for i, kind in ipairs(entries) do
-    local x = SX + 3 + ((i - 1) % 4) * 23
-    local y = 24 + floor((i - 1) / 4) * 21
-    local sel = g.tool == kind
-    UI.rect(x, y, 22, 20, sel and P.line or P.panel2)
-    if sel then UI.frame(x, y, 22, 20, P.yellow) end
-    UI.sprite(Sprites.machine[kind], x + 3, y + 2)
-    if UI.inside(x, y, 22, 20) then
-      local tip = kindTip(kind)
-      tip.lines[#tip.lines + 1] = 'KEY ' .. i
-      UI.tip = tip
-    end
-    if g.mode == 'build' and UI.clicked(x, y, 22, 20) then
-      g.tool = (not sel) and kind or nil
-    end
+      'WHAT YOUR MACHINES DRAW WHEN ALL OF THEM WORK / WHAT THE SITE SUPPLIES.',
+      'OVER THE LIMIT, EVERY MACHINE SLOWS DOWN IN PROPORTION.' } }
   end
 
   -- Upgrades. A card pops when its upgrade triggers.
-  UI.text('UPGRADES', SX + 4, 88, P.dim)
+  UI.text('UPGRADES', x0, 31, P.dim)
   g.hoverMod = nil
   for i = 1, Contracts.upgradeSlots do
-    local x, y = SX + 3 + (i - 1) * 18, 96
+    local x, y = x0 + ((i - 1) % 3) * 19, 38 + floor((i - 1) / 3) * 18
     local id = run.upgrades[i]
     if id then
       local def = Upgrades.byId[id]
@@ -622,35 +876,91 @@ local function drawSidebar(app)
     end
   end
 
-  -- Tooltip box. With nothing hovered during a shift it holds the ledger.
-  UI.panel(SX + 3, 115, 90, 46, P.bg, P.faint)
-  local rows = not UI.tip and live and ledgerRows(app)
+  -- During a shift: the ledger. Otherwise: the keys that matter right now.
+  local rows = live and ledgerRows(app)
+  local y = 78
+  if g.mode == 'annex' then
+    UI.text('NEW LAND', x0, y, P.cyan)
+    y = y + 8
+    for _, line in ipairs(plotLines(run.pendingPlot)) do
+      y = UI.paragraph(line, x0, y, 14, P.text)
+    end
+    y = y + 3
+  end
   if rows then
-    for i, row in ipairs(rows) do
-      local y = 111 + i * 7
+    for _, row in ipairs(rows) do
       local amount, color = Fx.amount(row)
-      local name = Fx.fit(row.mod.name, 84 - Font.width(amount) - 3)
-      UI.text(name, SX + 6, y, row.n > 0 and Fx.color(row.mod) or P.faint)
-      UI.textRight(amount, SX + 90, y, color)
+      local name = Fx.fit(row.mod.name, w - Font.width(amount) - 3)
+      UI.text(name, x0, y, row.n > 0 and Fx.color(row.mod) or P.faint)
+      UI.textRight(amount, SX + SW - 3, y, color)
+      y = y + 7
     end
   else
-    local tip = UI.tip or defaultTip(app)
-    UI.text(tip.title, SX + 6, 118, tip.color or P.text)
-    local y = 126
-    for _, s in ipairs(tip.lines) do
-      if s and y < 156 then y = UI.paragraph(s, SX + 6, y, 21, P.dim) end
+    local hints = HINTS[g.mode]
+    if g.mode == 'build' and (g.tool == 'select' or g.sel) then hints = HINTS.select end
+    if g.mode == 'build' and g.tool == 'stamp' then hints = HINTS.stamp end
+    for _, line in ipairs(hints or {}) do
+      UI.text(line, x0, y, P.faint)
+      y = y + 7
     end
   end
 
   -- Controls.
   if g.mode == 'build' then
-    if UI.button('RUN SHIFT', SX + 3, 164, 64, 13, { color = P.green }) then startShift(app) end
-    if UI.button('?', SX + 70, 164, 23, 13) then g.book = true end
+    if UI.button('RUN', x0, 164, 44, 13, { color = P.green }) then startShift(app) end
+    if UI.button('?', x0 + 46, 164, 12, 13) then g.book = true end
   elseif g.mode == 'run' then
     for i, s in ipairs({ 1, 2, 4 }) do
-      if UI.button(s .. 'X', SX + 3 + (i - 1) * 31, 164, 28, 13, { active = g.speed == s and not g.paused, color = P.blue }) then
+      if UI.button(s .. 'X', x0 + (i - 1) * 20, 164, 18, 13, { active = g.speed == s and not g.paused, color = P.blue }) then
         g.speed, g.paused = s, false
       end
+    end
+  end
+end
+
+---------------------------------------------------------------- drawing: palette
+
+-- The palette strip: the select tool, then every kind the run can build.
+local function paletteEntries(run)
+  local list = { 'select' }
+  for _, kind in ipairs(run:palette()) do list[#list + 1] = kind end
+  return list
+end
+
+local function drawPalette(app)
+  local g, run = app.g, app.run
+  UI.rect(0, PY, SX, 180 - PY, P.panel)
+  UI.rect(0, PY, SX, 1, P.line)
+  local entries = paletteEntries(run)
+  g.entries = entries
+  for i, kind in ipairs(entries) do
+    local x, y = (i - 1) * CELL, PY + 2
+    local sel = g.tool == kind or (kind == 'select' and g.sel ~= nil and g.tool == nil)
+    if sel then UI.rect(x, PY + 1, CELL, 19, P.line) end
+    if kind == 'select' then
+      -- A dashed box.
+      for k = 0, 2 do
+        UI.rect(x + 3 + k * 4, y + 3, 2, 1, P.text); UI.rect(x + 3 + k * 4, y + 12, 2, 1, P.text)
+        UI.rect(x + 3, y + 3 + k * 4, 1, 2, P.text); UI.rect(x + 12, y + 3 + k * 4, 1, 2, P.text)
+      end
+    else
+      UI.sprite(Sprites.machine[kind], x, y)
+    end
+    if sel then UI.frame(x, PY + 1, CELL, 19, P.yellow) end
+    if UI.inside(x, PY + 1, CELL, 19) then
+      local tip
+      if kind == 'select' then
+        tip = { title = 'SELECT', color = P.text, lines = {
+          'DRAG A BOX OVER PIECES, THEN C TO COPY, X TO CUT OR DELETE TO REMOVE THEM.', 'KEY V' } }
+      else
+        tip = kindTip(kind)
+        if i - 1 <= 10 then tip.lines[#tip.lines + 1] = 'KEY ' .. ((i - 1) % 10) end
+      end
+      UI.tip = tip
+    end
+    if g.mode == 'build' and UI.clicked(x, PY + 1, CELL, 19) then
+      g.tool = (g.tool ~= kind) and kind or nil
+      g.sel = nil
     end
   end
 end
@@ -658,7 +968,7 @@ end
 ---------------------------------------------------------------- drawing: overlays
 
 local function dim()
-  UI.rect(0, BY, SX, 160, P.dark, 0.6)
+  UI.rect(VX, VY, VW, VH, P.dark, 0.6)
 end
 
 local function drawIntro(app)
@@ -666,7 +976,7 @@ local function drawIntro(app)
   local c, rules = run:contract(), run.rules
   dim()
   local w, h = 188, 108
-  local x, y = floor((SX - w) / 2), 46
+  local x, y = floor(CX - w / 2), 34
   local cx = x + w / 2
   UI.panel(x, y, w, h, P.panel, c.boss and P.red or P.line)
   UI.textCenter('CONTRACT ' .. c.index .. ' OF ' .. run:total(), cx, y + 6, P.dim)
@@ -674,14 +984,11 @@ local function drawIntro(app)
   UI.textCenter(rules.shifts .. ' SHIFTS OF ' .. rules.shiftLen .. ' SECONDS', cx, y + 30, P.text)
   local yy = y + 42
   if c.index == 1 then
-    for _, line in ipairs(Font.wrap('LAY BELTS FROM THE PORTS ON THE LEFT TO THE EXPORT ON THE RIGHT. '
-        .. 'MACHINES IN BETWEEN ADD VALUE.', 42)) do
+    for _, line in ipairs(Font.wrap('LAY BELTS FROM THE PORTS TO THE DEPOT IN THE MIDDLE. '
+        .. 'MACHINES ON THE WAY ADD VALUE. BUILD AS MANY AS YOUR POWER ALLOWS.', 42)) do
       UI.textCenter(line, cx, yy, P.dim)
       yy = yy + 7
     end
-  elseif c.newSector then
-    UI.textCenter('NEW SECTOR: THE PORTS HAVE CHANGED', cx, yy, P.cyan)
-    yy = yy + 10
   end
   if c.boss then
     UI.textCenter('BOSS: ' .. c.boss.name, cx, yy, P.red)
@@ -699,7 +1006,7 @@ local function drawSummary(app)
   local s, c = g.summary, run:contract()
   dim()
   local w, h = 190, 138
-  local x, y = floor((SX - w) / 2), 31
+  local x, y = floor(CX - w / 2), 19
   local cx = x + w / 2
   UI.panel(x, y, w, h, P.panel, P.line)
   UI.textCenter('SHIFT ' .. run.shiftsUsed .. ' COMPLETE', cx, y + 5, P.text)
@@ -711,7 +1018,7 @@ local function drawSummary(app)
     return a < b
   end)
   local yy = y + 15
-  local shown = min(#order, 6)
+  local shown = min(#order, 5)
   for i = 1, shown do
     local t = order[i]
     local rec = s.sold[t]
@@ -727,6 +1034,13 @@ local function drawSummary(app)
   elseif #order == 0 then
     UI.textCenter('NOTHING WAS SOLD', cx, yy + 1, P.faint)
     yy = yy + 9
+  end
+  -- Where the factory fell short: the machine that worked the least.
+  if s.lowest then
+    local u = s.lowest.u
+    UI.text('LEAST BUSY: ' .. Machines[s.lowest.kind].name .. ' ' .. pct(u), x + 8, yy + 1,
+      u >= Factory.BUSY and P.green or (u >= 0.5 and P.yellow or P.red))
+    yy = yy + 8
   end
   UI.rect(x + 8, yy + 1, w - 16, 1, P.line)
   yy = yy + 5
@@ -772,7 +1086,7 @@ local function drawEnd(app, won)
   local run = app.run
   dim()
   local w, h = 180, 84
-  local x, y = floor((SX - w) / 2), 58
+  local x, y = floor(CX - w / 2), 46
   local cx = x + w / 2
   UI.panel(x, y, w, h, P.panel, won and P.gold or P.red)
   if won then
@@ -792,14 +1106,23 @@ function Game.draw(app)
   drawBoard(app)
   drawTopBar(app)
   drawSidebar(app)
+  drawPalette(app)
   if g.mode == 'run' and g.paused then
-    UI.textCenter('PAUSED', SX / 2, BY + 4, P.yellow)
+    UI.textCenter('PAUSED', CX, VY + 4, P.yellow)
+  end
+  if g.mode == 'annex' then
+    UI.rect(VX, VY, VW, 10, P.dark, 0.8)
+    UI.textCenter('NEW LAND: CLICK A FREE PLOT TO PLACE IT', CX, VY + 2, P.cyan)
   end
   if g.mode == 'intro' then drawIntro(app)
   elseif g.mode == 'summary' then drawSummary(app)
   elseif g.mode == 'over' then drawEnd(app, false)
   elseif g.mode == 'win' then drawEnd(app, true) end
-  if g.book then Book.draw(app) end
+  if g.book then
+    Book.draw(app)
+  elseif UI.tip then
+    UI.drawTip(UI.tip, UI.mx, UI.my)
+  end
 end
 
 ---------------------------------------------------------------- input
@@ -811,18 +1134,37 @@ function Game.press(app, x, y, b)
     completeReveal(g)     -- the first press only finishes the playback
     return
   end
-  local cx, cy = cellAt(x, y)
+  local cx, cy = cellAt(g, x, y)
+  if b == 3 and cx and g.mode ~= 'annex' then
+    g.panning = { x = x, y = y }       -- drag the site with the middle button
+    return
+  end
+  if g.mode == 'annex' and cx and b == 1 then
+    local sx, sy = Map.slotOf(cx, cy)
+    if app.run:annex(sx, sy) then
+      -- Back to work, looking at the new land.
+      g.mode = 'intro'
+      setZoom(g, 16, sx * Map.PW + Map.PW / 2, sy * Map.PH + Map.PH / 2)
+    end
+    return
+  end
   if g.mode ~= 'build' or not cx then
-    if b == 2 and g.mode == 'build' then g.tool = nil end
+    if b == 2 and g.mode == 'build' then g.tool, g.sel = nil, nil end
     UI.click = { x = x, y = y, b = b }
     return
   end
   local F = app.run.factory
   if b == 1 then
-    if g.tool then
+    if g.tool == 'select' then
+      g.sel = { x1 = cx, y1 = cy, x2 = cx, y2 = cy }
+      g.drag = { select = true, x = cx, y = cy }
+    elseif g.tool == 'stamp' then
+      pasteStamp(app, cx, cy)
+    elseif g.tool then
       placeAt(app, g.tool, cx, cy, g.dir)
       g.drag = { x = cx, y = cy, tool = g.tool }
     else
+      g.sel = nil
       local e = F:at(cx, cy)
       if e and not e.building.fixed then       -- pick it up to move it
         g.tool, g.dir = e.building.kind, e.building.dir
@@ -836,15 +1178,25 @@ function Game.press(app, x, y, b)
 end
 
 function Game.release(app)
-  app.g.drag = nil
+  local g = app.g
+  g.drag, g.panning = nil, nil
 end
 
 function Game.moved(app, x, y)
   local g = app.g
+  if g.panning then
+    Game.pan(app, g.panning.x - x, g.panning.y - y)
+    g.panning.x, g.panning.y = x, y
+    return
+  end
   local d = g.drag
   if not d or g.mode ~= 'build' then return end
-  local cx, cy = cellAt(x, y)
+  local cx, cy = cellAt(g, x, y)
   if not cx then return end
+  if d.select then
+    g.sel = { x1 = min(d.x, cx), y1 = min(d.y, cy), x2 = max(d.x, cx), y2 = max(d.y, cy) }
+    return
+  end
   local F = app.run.factory
   while d.x ~= cx or d.y ~= cy do
     local dx, dy = cx - d.x, cy - d.y
@@ -863,8 +1215,18 @@ function Game.moved(app, x, y)
   end
 end
 
+-- The wheel zooms: in on the tile under the mouse, out to the whole site.
 function Game.wheel(app, dy)
-  rotate(app, dy > 0 and 3 or 1)
+  local g = app.g
+  if g.book or g.mode == 'annex' then return end
+  local cam = g.cam
+  if dy > 0 and cam.T == 8 then
+    local cx, cy = cellAt(g, UI.mx, UI.my)
+    if not cx then cx, cy = depotCentre(app.run) end
+    setZoom(g, 16, cx + 0.5, cy + 0.5)
+  elseif dy < 0 and cam.T == 16 then
+    setZoom(g, 8, 0, 0)
+  end
 end
 
 function Game.key(app, key)
@@ -872,17 +1234,28 @@ function Game.key(app, key)
   if key == 'tab' then g.book = not g.book; return end
   if g.book then return end
   if key == 'u' then g.stats = not g.stats; return end
+  if key == 'z' and g.mode ~= 'annex' then
+    Game.wheel(app, g.cam.T == 8 and 1 or -1)
+    return
+  end
   if g.mode == 'intro' then
     if key == 'space' or key == 'return' then g.mode = 'build' end
   elseif g.mode == 'build' then
     if key == 'r' then rotate(app, 1)
-    elseif key == 'q' then g.tool = nil
+    elseif key == 'q' then g.tool, g.sel = nil, nil
+    elseif key == 'v' then g.tool = (g.tool ~= 'select') and 'select' or nil
+    elseif key == 'c' then copySelection(app, false)
+    elseif key == 'x' then copySelection(app, true)
+    elseif key == 'delete' or key == 'backspace' then deleteSelection(app)
     elseif key == 'space' or key == 'return' then startShift(app)
-    elseif key == 'x' then clearBoard(app)
     else
       local n = tonumber(key)
-      local kind = n and g.entries and g.entries[n]
-      if kind then g.tool = (g.tool ~= kind) and kind or nil end
+      if n == 0 then n = 10 end
+      local kind = n and g.entries and g.entries[n + 1]
+      if kind then
+        g.tool = (g.tool ~= kind) and kind or nil
+        g.sel = nil
+      end
     end
   elseif g.mode == 'run' then
     if key == 'space' then g.paused = not g.paused
@@ -896,16 +1269,41 @@ function Game.key(app, key)
   end
 end
 
--- Esc: close the recipe book or drop the piece in hand. Returns false when
--- there was nothing to cancel (the app then opens the pause menu).
+-- Esc: close the recipe book, or put away the tool or the selection. Returns
+-- false when there was nothing to cancel (the app then opens the pause menu).
 function Game.cancel(app)
   local g = app.g
   if g.book then g.book = false; return true end
-  if g.mode == 'build' and g.tool then g.tool = nil; return true end
+  if g.mode == 'build' and (g.tool or g.sel) then g.tool, g.sel = nil, nil; return true end
   return false
 end
 
--- Exposed for the screenshot script.
+---------------------------------------------------------------- for scripts
+
+-- Canvas position of the middle of a tile, at the current zoom.
+function Game.cellXY(app, cx, cy)
+  local x, y = tilePos(app.g, cx, cy)
+  return x + app.g.cam.T / 2, y + app.g.cam.T / 2
+end
+
+-- Canvas position of a palette entry ('select' or a kind), or nil.
+function Game.paletteXY(app, kind)
+  for i, k in ipairs(paletteEntries(app.run)) do
+    if k == kind then return (i - 1) * CELL + CELL / 2, PY + 10 end
+  end
+end
+
+-- Canvas positions of the fixed buttons.
+Game.at = {
+  run = { SX + 25, 170 }, book = { SX + 55, 170 },
+  speed = { { SX + 12, 170 }, { SX + 32, 170 }, { SX + 52, 170 } },
+  menu = { 304, 4 },
+  intro = { CX, 131 },          -- START
+  summary = { CX + 57, 146 },   -- NEXT SHIFT / COLLECT / END RUN
+  finish = { CX, 118 },         -- TITLE on the end screen
+}
+
 Game.startShift, Game.fastForward, Game.afterSummary, Game.placeAt = startShift, fastForward, afterSummary, placeAt
+Game.setZoom, Game.cellAt, Game.copySelection = setZoom, cellAt, copySelection
 
 return Game

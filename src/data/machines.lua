@@ -46,8 +46,10 @@ local Machines = {
 
   -- Fixed board features (never in the kit).
   port   = { name = 'Port',   fixed = true, desc = 'Supplies 1 raw item every 2s.' },
-  export = { name = 'Export', fixed = true, desc = 'Sells every item that enters.' },
-  rubble = { name = 'Rubble', fixed = true, desc = 'Blocked tile.' },
+  export = { name = 'Depot', fixed = true, desc = 'Sells every item that enters, from any side.' },
+  rubble = { name = 'Rubble', fixed = true, desc = 'Blocked for this contract.' },
+  rock   = { name = 'Rock',   fixed = true, desc = 'Nothing can be built here.' },
+  node   = { name = 'Power Node', fixed = true, desc = 'Adds 12W while you own this plot.' },
 }
 
 for kind, def in pairs(Machines) do def.kind = kind end

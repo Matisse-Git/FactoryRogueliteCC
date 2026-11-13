@@ -252,7 +252,7 @@ function Transfer.system(world, F)
       end
     else
       if mv.buf.export then
-        F:sell(it, mv.buf)
+        F:sell(it, mv.buf, d)
       else
         Machine.deliver(mv.buf, it)
       end
