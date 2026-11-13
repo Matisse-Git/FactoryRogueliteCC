@@ -165,7 +165,10 @@ ten production machines, 37 items in five tiers where every step is worth about
 burn, and crates; 12 contracts from $120 to $5M, each with a market (products in
 demand pay x3 on a limited number of units per shift, one product may slump),
 a choice between two contracts before every shop, and credits for beating the
-quota by 2x, 4x and 8x.
+quota by 2x, 4x and 8x; a shop of one blueprint or alternate recipe, two modules
+(40 in three rarities, 5 slots, SELL under each, buying a sixth asks which one
+it replaces) and three investments (power, port rates, machine speeds, value
+per raw material, each bought a level at a time).
 The quota curve is a first pass, and the rest of this file still
 describes the single-board prototype in places. No audio, no saved runs. Art is
 placeholder.

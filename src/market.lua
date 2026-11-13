@@ -159,16 +159,19 @@ function Market.mod(market)
     for _, d in ipairs(market.demand) do
       if d.item == ctx.type then
         s.market = s.market or {}
+        local rules = ctx.rules
         local used = s.market[d.item] or 0
         local bonus = math.min(ctx.units, math.max(0, d.units - used))
+        if rules.demandUnlimited then bonus = ctx.units end
         s.market[d.item] = used + ctx.units
         if bonus > 0 then
-          ctx.value = ctx.value * (bonus * d.mult + (ctx.units - bonus)) / ctx.units
+          local mult = d.mult + rules.demandBonus
+          ctx.value = ctx.value * (bonus * mult + (ctx.units - bonus)) / ctx.units
         end
       end
     end
     if market.slump and market.slump.item == ctx.type then
-      ctx.value = ctx.value * market.slump.mult
+      ctx.value = ctx.value * (ctx.rules.slumpMult or market.slump.mult)
     end
   end
   market.mod = mod

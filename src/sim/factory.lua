@@ -37,16 +37,19 @@ local function portSystem(world)
   for i = 1, #ports do
     local e = ports[i]
     local p = e.port
-    if p.cd > 0 then p.cd = p.cd - 1 end
-    if p.cd == 0 and not e.slot.item then
+    -- A port fills up at its rate and lets an item go whenever it holds a
+    -- whole one and its mouth is free, so any rate up to one a tick works.
+    p.acc = p.acc + p.rate
+    if p.acc >= 1 and not e.slot.item then
       e.slot.item = world:spawn({
         item = { type = p.item, polished = 0, dist = 0 },
         pos = { x = e.pos.x, y = e.pos.y },
         prev = { x = e.pos.x, y = e.pos.y },
         hidden = true,
       })
-      p.cd = p.period
+      p.acc = p.acc - 1
     end
+    if p.acc > 1 then p.acc = 1 end       -- blocked: it holds one item, no more
   end
 end
 
@@ -153,7 +156,8 @@ function Factory:place(kind, x, y, dir, extra)
     e.filter = { item = extra.item, ptr = 1 }     -- item: the type that goes straight on
     e.slot = Transfer.newSlot(e, 'filter')
   elseif kind == 'port' then
-    e.port = { item = extra.item, period = extra.period or 2, cd = 0, sent = 0 }
+    -- period: seconds per item on the plot; rate: items per tick this shift.
+    e.port = { item = extra.item, period = extra.period or 2, rate = 1 / (extra.period or 2), acc = 1, sent = 0 }
     e.slot = Transfer.newSlot(e, 'port')
   elseif kind == 'export' then
     -- premium[d]: price multiplier for items entering while travelling d.
@@ -229,7 +233,14 @@ local function newShift(rules, ledger)
   }
 end
 
--- info.warm overrides the number of warm-up ticks (0 = a cold start).
+-- Items per tick a port supplies under these rules: its own rate times what
+-- has been invested in its resource, at most a full belt.
+function Factory:portRate(e, rules)
+  return math.min(1, (1 / e.port.period) * (rules.portRate[e.port.item] or 1))
+end
+
+-- info.warm overrides the number of warm-up ticks (0 = a cold start);
+-- info.shiftNo is the number of this shift within its contract.
 function Factory:beginShift(rules, info)
   self.rules = rules
   self.shiftId = (self.shiftId or 0) + 1
@@ -261,7 +272,10 @@ function Factory:beginShift(rules, info)
     end
     if e.splitter then e.splitter.ptr = 1; e.splitter.count = 0 end
     if e.filter then e.filter.ptr = 1 end
-    if e.port then e.port.cd = 0; e.port.sent = 0 end
+    if e.port then
+      e.port.rate = self:portRate(e, rules)
+      e.port.acc, e.port.sent = 1 - e.port.rate, 0      -- the first item leaves on the first tick
+    end
     if e.export then e.export.cd = 0; e.export.sold = 0; e.export.log = {} end
     if e.machine then
       Machine.reset(e)
@@ -283,6 +297,7 @@ function Factory:beginShift(rules, info)
   end
 
   self.shift = newShift(rules, ledger)
+  self.shift.shiftNo = info and info.shiftNo or 1
   self.events = {}
   rules:resetShift()
 
@@ -389,13 +404,15 @@ function Factory:endShift()
   local s = self.shift
   local perfect, any = true, false
   local lowest
+  local count, busy = 0, 0
   local machines = self.world:query('machine')
   for i = 1, #machines do
     local e = machines[i]
     local u = self:utilisation(e)
     if u then
       any = true
-      if u < Factory.BUSY then perfect = false end
+      count = count + 1
+      if u < Factory.BUSY then perfect = false else busy = busy + 1 end
       if not lowest or u < lowest.u then lowest = { u = u, kind = e.building.kind } end
     end
   end
@@ -406,26 +423,21 @@ function Factory:endShift()
     sold = s.sold, kinds = #s.order,
     perfect = any and perfect,
     spare = math.max(0, supply - demand),
+    shiftNo = s.shiftNo, busy = busy, machines = count,
   }
   local results = self.rules:shiftEnd(sc)
-  local total = math.floor(s.revenue * sc.mult + 0.5)
-  local last
+  local exact = s.revenue * sc.mult
+  local total = math.floor(exact + 0.5)
   for _, res in ipairs(results) do
     if res.fired then
       local rec = s.ledger[res.mod]
       rec.delta = rec.delta + res.delta
       rec.n = rec.n + 1
-      last = res
     end
   end
-  if last then   -- rounding goes to the last multiplier, as it does per sale
-    local resid = total - s.revenue * sc.mult
-    last.delta = last.delta + resid
-    s.ledger[last.mod].delta = s.ledger[last.mod].delta + resid
-  end
-  -- `plain` + every ledger delta = `total`.
+  -- `plain` + every ledger delta = `exact`; `total` is that, rounded.
   return {
-    base = s.revenue, mult = sc.mult, notes = sc.notes, total = total,
+    base = s.revenue, mult = sc.mult, notes = sc.notes, total = total, exact = exact,
     sold = s.sold, order = s.order, perfect = sc.perfect,
     plain = s.plain, ledger = s.ledger, results = results,
     ticks = s.tick, supply = supply, demand = demand, lowest = lowest,

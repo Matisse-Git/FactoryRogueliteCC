@@ -217,7 +217,7 @@ return function()
     s = runShift(straight(), rules('monopoly'))
     check('Monopoly doubles a single-type shift', s.total == 60 and s.mult == 2, soldString(s))
     s = runShift(straight(), rules('scenic_route'))
-    check('Scenic Route pays for distance', s.total == 30 * (1 + 3), soldString(s))
+    check('Scenic Route pays 2% a tile (12 tiles: 30 ore at $1.24)', s.total == 37 and math.abs(s.exact - 37.2) < 1e-6, soldString(s))
     s = runShift(straight(), rules('overtime'))
     check('Overtime lengthens the shift', s.total > 30, soldString(s))
     s = runShift(straight(), rules('minimalist'))
@@ -265,7 +265,8 @@ return function()
     }))
     check('assembler builds 10 motors a minute from gear + wire', count(s, 'motor') == 10 and s.total == 320, soldString(s))
 
-    s = runShift(layout({ 'K> p> E<' }), rules('pressure'))
+    local Alternates = require 'src.data.alternates'
+    s = runShift(layout({ 'K> p> E<' }), Rules.new({ Alternates.byId.pressure }))
     check('Pressure: press makes diamonds from coal', count(s, 'diamond') >= 15, soldString(s))
 
     local plain = runShift(layout({ 'I> y> b> E<' })).total
@@ -506,13 +507,14 @@ return function()
 
     -- Crates.
     s = runShift(layout({ 'I> s> k> E<' }))
-    check('packer: 4 ingots to a crate, sold as 4 items for 10% more (3 crates, $13 each)',
-      count(s, 'iron_ingot') == 12 and s.total == 39, soldString(s))
+    check('packer: 4 ingots to a crate, sold as 4 items for 10% more (3 crates at $13.20)',
+      count(s, 'iron_ingot') == 12 and math.abs(s.exact - 39.6) < 1e-6, soldString(s))
     s = runShift(layout({ 'I> s> k> p> E<' }))
     check('nothing opens a crate', s.total == 0, soldString(s))
     s = runShift(layout({ 'I> s> o> k> E<' }), Rules.new({}, power))
     local packed = count(s, 'iron_ingot')
-    check('polish first, then pack: crates of polished ingots at $26', packed >= 12 and packed % 4 == 0 and s.total == packed / 4 * 26, soldString(s))
+    check('polish first, then pack: crates of polished ingots at $26.40',
+      packed >= 12 and packed % 4 == 0 and math.abs(s.exact - packed / 4 * 26.4) < 1e-6, soldString(s))
 
     -- Depth pays: every recipe is worth 2x to 3.5x what goes in.
     local worst, best = math.huge, 0
@@ -587,8 +589,8 @@ return function()
     F:place('export', 2, 2, 2)
     s = runShift(F, Rules.new({ Market.mod({ demand = { { item = 'gear', mult = 3, units = 6 } } }) }))
     local crates = count(s, 'gear') / 4
-    check('a crate of 4 with 2 units of demand left pays x3 on those 2 ($106, $70, then $35 each)',
-      crates >= 7 and s.total == 106 + 70 + (crates - 2) * 35, soldString(s))
+    check('a crate of 4 with 2 units of demand left pays x3 on those 2 ($105.60, $70.40, then $35.20 each)',
+      crates >= 7 and math.abs(s.exact - (105.6 + 70.4 + (crates - 2) * 35.2)) < 1e-6, soldString(s))
 
     -- What a site can make, and what it would take.
     local res = { iron_ore = true, copper_ore = true }
@@ -665,7 +667,7 @@ return function()
     local F = layout({ 'I> s> E<' })
     F:at(2, 0).export.premium[0] = 1.5
     local s = runShift(F, Rules.new({ Contracts.premium }))
-    check('a premium face pays 1.5x (15 ingots at $4.50, rounded per sale: $75)', s.total == 75, soldString(s))
+    check('a premium face pays 1.5x (15 ingots at $4.50: $67.50)', math.abs(s.exact - 67.5) < 1e-6 and s.total == 68, soldString(s))
     check('and the ledger credits it', s.ledger[Contracts.premium].n == 15)
   end
 
@@ -696,21 +698,220 @@ return function()
       run:unlocked('smelter') and run:unlocked('press') and not run:unlocked('assembler'))
     check('logistics need no blueprint', run:unlocked('belt') and run:unlocked('splitter') and run:unlocked('bridge'))
     check('fixed pieces cannot be built', not run:unlocked('port') and not run:unlocked('export'))
-    run.credits = 50
+    check('a run is 12 contracts', run:total() == 12 and #run.bosses == 4)
+  end
+
+  -- 12b. The shop: one blueprint or recipe, two modules, three investments.
+  do
+    local Investments = require 'src.data.investments'
+    local Alternates = require 'src.data.alternates'
+    local Machines = require 'src.data.machines'
+    local run = Run.new(7)
+    run.credits = 500
     run:openShop()
-    local bought
-    for i, o in ipairs(run.shop.offers) do
-      if o.type == 'blueprint' and not bought then
-        check('the shop never offers an owned blueprint', not run.blueprints[o.id], o.id)
-        run:buy(i)
-        bought = o.id
+    local offers = run.shop.offers
+    local kinds = {}
+    for i, o in ipairs(offers) do kinds[i] = o.type end
+    check('six offers: blueprint or recipe, 2 modules, 3 investments',
+      #offers == 6 and (kinds[1] == 'blueprint' or kinds[1] == 'recipe') and kinds[2] == 'upgrade' and kinds[3] == 'upgrade'
+      and kinds[4] == 'invest' and kinds[5] == 'invest' and kinds[6] == 'invest', table.concat(kinds, ','))
+    check('the two modules differ, and so do the investments',
+      offers[2].id ~= offers[3].id and offers[4].id ~= offers[5].id and offers[5].id ~= offers[6].id and offers[4].id ~= offers[6].id)
+
+    -- Over many rolls: never anything owned, never an investment that does nothing here.
+    local ok, sawBlueprint, sawRecipe = true, false, false
+    run.upgrades = { 'bullion', 'middleman' }
+    run.recipes = { 'twin_dies' }
+    for _ = 1, 60 do
+      run:rollShop()
+      for _, o in ipairs(run.shop.offers) do
+        if o.type == 'blueprint' then
+          sawBlueprint = true
+          ok = ok and not run.blueprints[o.id] and o.id ~= 'manufacturer'
+        elseif o.type == 'recipe' then
+          sawRecipe = true
+          ok = ok and o.id ~= 'twin_dies' and run:unlocked(Alternates.byId[o.id].kind)
+        elseif o.type == 'upgrade' then
+          ok = ok and o.id ~= 'bullion' and o.id ~= 'middleman'
+        else
+          local def = Investments.byId[o.id]
+          ok = ok and def.item ~= 'crude' and def.kind ~= 'assembler' and def.mat ~= 'oil'
+        end
       end
     end
-    check('buying a blueprint unlocks the machine', bought ~= nil and run:unlocked(bought), bought)
-    local watts, credits = run.rules.basePower, run.credits
-    run:buyPower()
-    check('buying power raises the supply', run.rules.basePower == watts + Contracts.powerStep and run.credits < credits)
-    check('a run is 12 contracts', run:total() == 12 and #run.bosses == 4)
+    check('offers: nothing owned, nothing useless on this site, no manufacturer before the assembler',
+      ok and sawBlueprint and sawRecipe)
+
+    -- Buying each kind of thing.
+    run.upgrades, run.recipes = {}, {}
+    run.shop.offers = {
+      { type = 'blueprint', id = 'assembler', cost = 8 },
+      { type = 'recipe', id = 'twin_dies', cost = 8 },
+      { type = 'upgrade', id = 'bullion', cost = 5 },
+      { type = 'invest', id = 'power', cost = 3 },
+      { type = 'invest', id = 'value:iron', cost = 4 },
+    }
+    local credits, watts = run.credits, run.rules.basePower
+    for i = 1, 5 do run:buy(i) end
+    check('buying a blueprint unlocks the machine', run:unlocked('assembler'))
+    check('buying a recipe adds it to the rules', run:hasRecipe('twin_dies') and #run.rules:recipesFor('press') == 6)
+    check('buying a module fills a slot', run.upgrades[1] == 'bullion')
+    check('a grid upgrade adds 10W', run.rules.basePower == watts + 10 and run.levels.power == 1)
+    check('an investment gains a level, and the next one costs more',
+      run.levels['value:iron'] == 1 and Investments.cost(Investments.byId['value:iron'], 1) == 6)
+    check('credits are spent, and nothing can be bought twice', run.credits == credits - 28 and not run:buy(1))
+
+    -- Five slots, then replace.
+    run.upgrades = { 'bullion', 'middleman', 'monopoly', 'embargo', 'last_call' }
+    run.shop.offers = { { type = 'upgrade', id = 'perfect_ratio', cost = 10 } }
+    run.credits = 7
+    check('a sixth module cannot simply be bought', run:buyBlocked(1) == 'slots full' and not run:buy(1))
+    check('the refund counts towards the price (7 + 2 < 10, 7 + 3 >= 10)',
+      not run:canReplace(1, 1) and run:canReplace(3, 1))
+    check('replacing swaps it into the same slot', run:replaceUpgrade(3, 1)
+      and run.upgrades[3] == 'perfect_ratio' and #run.upgrades == 5 and run.credits == 0 and run.upgrades[4] == 'embargo')
+    check('selling pays half the price', run:sellUpgrade(3) and run.credits == 5 and #run.upgrades == 4)
+
+    -- What is on sale depends on the site.
+    local res, own = { iron_ore = true }, { smelter = true }
+    local I = Investments.byId
+    check('investments must do something here',
+      Investments.eligible(I.power, 9, res, own) and Investments.eligible(I['rate:iron_ore'], 0, res, own)
+      and not Investments.eligible(I['rate:crude'], 0, res, own) and not Investments.eligible(I['speed:press'], 0, res, own)
+      and Investments.eligible(I['value:iron'], 20, res, own) and not Investments.eligible(I['value:gold'], 0, res, own))
+    check('rates stop at a full belt, speeds at level 5',
+      not Investments.eligible(I['rate:iron_ore'], 4, res, own) and not Investments.eligible(I['speed:smelter'], 5, res, own))
+    local n = 0
+    for _ in ipairs(Investments.list) do n = n + 1 end
+    check('23 investments: power, 6 rates, 10 speeds, 6 values', n == 23, n)
+    check('7 alternate recipes, each for a real machine', #Alternates.list == 7 and Machines[Alternates.list[7].kind] ~= nil)
+  end
+
+  -- 12c. Investments, alternate recipes and modules at work.
+  do
+    local Investments = require 'src.data.investments'
+    local Alternates = require 'src.data.alternates'
+    local Market = require 'src.market'
+    local layout = require 'tests.layout'
+    local U = Upgrades.byId
+    local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
+    local function near(a, b) return math.abs(a - b) < 1e-6 end
+    local function straight(item)
+      local F = Factory.new()
+      F:place('port', 0, 2, 0, { item = item })
+      belts(F, 1, 5, 2)
+      F:place('export', 6, 2, 2)
+      return F
+    end
+    local function with(levels, mods)
+      local list = Investments.mods(levels)
+      for _, m in ipairs(mods or {}) do list[#list + 1] = m end
+      return Rules.new(list, { basePower = 200 + Investments.watts(levels), portRate = Investments.rates(levels) })
+    end
+
+    local s = runShift(straight('gear'), with({ ['value:iron'] = 2 }))
+    check('iron value 2: gears sell for +40% (30 x $11.20)', near(s.exact, 336), s.exact)
+    s = runShift(straight('motor'), with({ ['value:iron'] = 1, ['value:copper'] = 1 }))
+    check('a motor gets the iron and the copper bonus, multiplied (x1.44)', near(s.exact, 30 * 32 * 1.44), s.exact)
+    s = runShift(straight('glass'), with({ ['value:iron'] = 3 }))
+    check('and glass gets neither', near(s.exact, 90), s.exact)
+
+    s = runShift(straight('iron_ore'), with({ ['rate:iron_ore'] = 2 }))
+    check('iron rate 2: the port supplies 45 a minute', count(s, 'iron_ore') == 45, soldString(s))
+    s = runShift(straight('iron_ore'), with({ ['rate:iron_ore'] = 4 }))
+    check('iron rate 4: a full belt, 60 a minute', count(s, 'iron_ore') == 60, soldString(s))
+    local F = straight('iron_ore')
+    F.world:query('port')[1].port.period = 1
+    s = runShift(F, with({ ['rate:iron_ore'] = 4 }))
+    check('a rich port cannot go past a full belt', count(s, 'iron_ore') == 60, soldString(s))
+
+    s = runShift(layout({ 'I> s> E<' }), with({ ['speed:smelter'] = 5 }))
+    check('smelter speed 5: one smelter keeps up with a port (30 ingots)', count(s, 'iron_ingot') == 30, soldString(s))
+    F = layout({ 'I> s> E<' })
+    local r = with({ ['speed:smelter'] = 1, ['value:iron'] = 1 })
+    s = runShift(F, r)
+    check('investments leave no marks on the board', r:affecting(F, F:at(1, 0)) == nil and F:at(1, 0).machine.speed == 1.2)
+    local credited = 0
+    for mod, rec in pairs(s.ledger) do
+      if mod.investment then credited = credited + rec.delta end
+    end
+    check('but the ledger credits them (18 ingots x $0.60)', near(credited, count(s, 'iron_ingot') * 0.6), credited)
+    check('power comes in steps of 10W', Investments.watts({ power = 3 }) == 30)
+
+    -- Alternate recipes.
+    s = runShift(layout({ 'I> s> p> E<' }), Rules.new({ Alternates.byId.twin_dies }))
+    check('Twin Dies: 2 gears from every ingot (30 gears)', count(s, 'gear') == 30, soldString(s))
+    s = runShift(layout({ 'I> bv ..', '.. f> E<', 'K> b^ ..' }), Rules.new({ Alternates.byId.blast_furnace }))
+    check('Blast Furnace: steel straight from ore and coal', count(s, 'steel') == 12, soldString(s))
+    F = layout({ 'O> r> b> t> r> E<', '.. .. .. E. .. ..' })
+    F:at(3, 0).filter.item = 'tar'
+    s = runShift(F, Rules.new({ Alternates.byId.cracking }, { basePower = 100 }))
+    check('Cracking: tar becomes plastic too (15 + 15)', count(s, 'plastic') == 30 and count(s, 'tar') == 0, soldString(s))
+    s = runShift(layout({ 'I> s> w> E<' }), Rules.new({ Alternates.byId.iron_wire }))
+    check('Iron Wire: a wire mill takes iron ingots', count(s, 'wire') == 30, soldString(s))
+
+    -- Modules: 40 of them, priced by rarity.
+    local byRarity, codes, clash = {}, {}, false
+    for _, u in ipairs(Upgrades.list) do
+      byRarity[u.rarity] = (byRarity[u.rarity] or 0) + 1
+      if codes[u.code] or u.cost ~= Upgrades.COST[u.rarity] or not u.desc then clash = true end
+      codes[u.code] = true
+    end
+    check('40 modules: 19 common, 18 uncommon, 3 rare, each with its own code',
+      #Upgrades.list == 40 and byRarity.common == 19 and byRarity.uncommon == 18 and byRarity.rare == 3 and not clash)
+
+    s = runShift(straight('iron_ingot'), rules('bullion'))
+    check('Bullion: tier 2 sells for triple', s.total == 270, soldString(s))
+    s = runShift(straight('gear'), rules('middleman', 'deep_pockets'))
+    check('Middleman x2 and Deep Pockets +30% on a tier 3 gear', near(s.exact, 30 * 8 * 2 * 1.3), s.exact)
+    s = runShift(straight('engine'), rules('heavy_industry', 'top_shelf'))
+    check('Heavy Industry +60% and Top Shelf +50% on an engine', near(s.exact, 30 * 232 * 1.6 * 1.5), s.exact)
+    s = runShift(straight('motor'), rules('heavy_industry', 'top_shelf'))
+    check('neither applies to a motor (2 materials, tier 4)', s.total == 960, soldString(s))
+    s = runShift(straight('gear'), rules('short_haul'))
+    check('Short Haul stays quiet after 5 tiles', s.total == 240, soldString(s))
+    s = runShift(layout({ 'I> s> b> b> E<' }), rules('short_haul'))
+    check('and pays +40% within 3', near(s.exact, 15 * 3 * 1.4), s.exact)
+
+    local market = Market.mod({ demand = { { item = 'gear', mult = 3, units = 10 } }, slump = { item = 'plate', mult = 0.5 } })
+    s = runShift(straight('gear'), Rules.new({ market, U.bull_run }))
+    check('Bull Run: demand pays x4 (10 x 32 + 20 x 8)', s.total == 480, soldString(s))
+    s = runShift(straight('gear'), Rules.new({ market, U.cornered_market }))
+    check('Cornered Market: demand never runs out (30 x 24)', s.total == 720, soldString(s))
+    s = runShift(straight('plate'), Rules.new({ market, U.contrarian }))
+    check('Contrarian: the slump pays double (30 x 16)', s.total == 480, soldString(s))
+
+    F = straight('gear')
+    F:beginShift(rules('night_shift'), { shiftNo = 1 })
+    while not F:finished() do F:step() end
+    local first = F:endShift()
+    F:beginShift(rules('night_shift'), { shiftNo = 2 })
+    while not F:finished() do F:step() end
+    check('Night Shift doubles the first shift only', first.mult == 2 and F:endShift().mult == 1)
+
+    s = runShift(layout({ 'I> y> s> E<', '.. s> E< ..' }), rules('efficiency'))
+    check('Efficiency Bonus: +2% per machine that kept busy', near(s.mult, 1.04), s.mult)
+    s = runShift(layout({ 'I> s> p> E<' }), rules('efficiency'))
+    check('and nothing for one that idled', near(s.mult, 1.02), s.mult)
+
+    F = layout({ 'I> s> E<' })
+    r = Rules.new({ U.overclock }, { basePower = 100 })
+    s = runShift(F, r)
+    check('Overclock: 25% faster for 50% more watts, with no marks on the board',
+      F:at(1, 0).machine.speed == 1.25 and F:at(1, 0).machine.draw == 4.5 and r:affecting(F, F:at(1, 0)) == nil)
+    F = layout({ 'I> bv ..', '.. f> E<', 'K> b^ ..' })
+    r = Rules.new({ U.twin_feed }, { basePower = 100 })
+    check('Twin Feed marks a machine fed from two sides', r:affecting(F, F:at(1, 1)) ~= nil
+      and r:affecting(layout({ 'I> s> E<' }), layout({ 'I> s> E<' }):at(1, 0)) == nil)
+    F = layout({ 'I> s> b> b> b> s> E<' })
+    r = rules('depot_district')
+    check('Depot District marks machines within 2 tiles of the depot',
+      r:affecting(F, F:at(5, 0)) ~= nil and r:affecting(F, F:at(1, 0)) == nil)
+
+    s = runShift(layout({ 'I> s> k> E<' }), rules('bulk_freight'))
+    check('Bulk Freight: crates +30%', near(s.exact, count(s, 'iron_ingot') / 4 * 13.2 * 1.3), s.exact)
+    s = runShift(layout({ 'I> o> E<' }), Rules.new({ U.premium_brand }, { basePower = 100 }))
+    check('Premium Brand: polished items a further +50% (30 ore at $3)', s.total == 90, soldString(s))
   end
 
   -- 13. Triggers: which mod did what, when, and for how much.
@@ -751,11 +952,11 @@ return function()
     local rec = s.ledger[U.bulk_order]
     check('Bulk Order is credited $3 a time', rec.n == 3 and near(rec.delta, 9) and s.total == 39, rec.delta)
 
-    s, log = watchShift(layout({ 'I> b> b> E<' }), rules('scenic_route'))
-    check('Scenic Route stays quiet under 4 tiles', #log == 0 and s.ledger[U.scenic_route].n == 0 and s.total > 0, #log)
+    s, log = watchShift(layout({ 'I> E<' }), rules('scenic_route'))
+    check('Scenic Route stays quiet with no belt', #log == 0 and s.ledger[U.scenic_route].n == 0 and s.total > 0, #log)
     s, log = watchShift(straight(), rules('scenic_route'))
     check('Scenic Route triggers on every sale off a long belt',
-      #log == 30 and near(s.ledger[U.scenic_route].delta, 90) and all(log, function(t) return t.what == 'sale' and t.x == 13 end), #log)
+      #log == 30 and near(s.ledger[U.scenic_route].delta, 7.2) and all(log, function(t) return t.what == 'sale' and t.x == 13 end), #log)
 
     s, log = watchShift(straight(), rules('gold_standard'))
     check('Gold Standard stays quiet with no gold sold', #log == 0, #log)
@@ -786,11 +987,12 @@ return function()
 
     -- The ledger always adds up, fractions and multipliers included.
     s = watchShift(straight(), rules('fools_gold', 'gold_standard', 'scenic_route', 'last_call'))
-    check('ledger adds up to the revenue (fractional values)', near(ledgerSum(s), s.total) and s.ledger[U.gold_standard].n > 0,
-      ledgerSum(s) .. ' vs ' .. s.total)
+    check('ledger adds up to the revenue (fractional values)',
+      near(ledgerSum(s), s.exact) and math.abs(s.total - s.exact) <= 0.5 and s.ledger[U.gold_standard].n > 0,
+      ledgerSum(s) .. ' vs ' .. s.exact)
     s = watchShift(straight(), rules('fools_gold', 'gold_standard', 'monopoly', 'minimalist'))
-    check('ledger adds up to the total (with two multipliers)', near(ledgerSum(s), s.total) and near(s.mult, 2 * 1.48),
-      ledgerSum(s) .. ' vs ' .. s.total)
+    check('ledger adds up to the total (with two multipliers)', near(ledgerSum(s), s.exact) and near(s.mult, 2 * 1.48),
+      ledgerSum(s) .. ' vs ' .. s.exact)
 
     -- End of shift: one result per mod with a shiftEnd hook, fired or not.
     s = watchShift(layout({ 'I> s> E<' }), rules('perfect_ratio'))
@@ -809,10 +1011,11 @@ return function()
     s, log = watchShift(layout({ 'K> g>', 'I> b> b> E<' }), rules('conveyor_oven'))
     check('Conveyor Oven triggers on the belt by the generator',
       #log > 0 and all(log, function(t) return t.mod == U.conveyor_oven and t.what == 'smelt' and t.x == 1 and t.y == 1 end), #log)
-    s, log = watchShift(layout({ 'K> p> E<' }), rules('pressure'))
+    local pressure = require('src.data.alternates').byId.pressure
+    s, log = watchShift(layout({ 'K> p> E<' }), Rules.new({ pressure }))
     check('Pressure triggers on each diamond craft',
-      #log >= s.sold.diamond.n and all(log, function(t) return t.mod == U.pressure and t.what == 'craft' and t.x == 1 end), #log)
-    s, log = watchShift(layout({ 'I> s> p> E<' }), rules('pressure'))
+      #log >= s.sold.diamond.n and all(log, function(t) return t.mod == pressure and t.what == 'craft' and t.x == 1 end), #log)
+    s, log = watchShift(layout({ 'I> s> p> E<' }), Rules.new({ pressure }))
     check('Pressure stays quiet on ordinary recipes', #log == 0 and s.total > 0, #log)
     s, log = watchShift(layout({ 'I> o> o> E<' }), rules('double_polish'))
     check('Mirror Finish triggers on the second polish only',

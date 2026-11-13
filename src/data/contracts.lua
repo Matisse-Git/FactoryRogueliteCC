@@ -23,8 +23,6 @@ Contracts.perSector = 3
 Contracts.shifts = 3        -- shifts per contract
 Contracts.shiftLen = 60     -- seconds (ticks) per shift
 Contracts.basePower = 16    -- watts the run starts with
-Contracts.powerStep = 8     -- watts per power purchase in the shop
-Contracts.powerCost = 4     -- its first price; +1 per purchase
 
 -- The plot a run starts on: the depot in the middle and these ports.
 Contracts.startPlot = { items = { 'iron_ore', 'copper_ore' }, rocks = 0 }
@@ -50,7 +48,6 @@ Contracts.reward = {
 }
 Contracts.startCredits = 4
 Contracts.startBlueprints = { 'smelter', 'press' }
-Contracts.upgradeSlots = 5
 Contracts.rerollCost = 2
 
 -- Always-on rule of the site: a premium depot face pays extra. It takes

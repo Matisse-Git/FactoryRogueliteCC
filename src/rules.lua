@@ -16,6 +16,8 @@ local Contracts = require 'src.data.contracts'
 --                    reports the moment that field or recipe does something.
 -- Each mod is credited with its marginal change in slot order, so the credits
 -- of one sale add up to exactly what the sale paid over its plain value.
+-- (A sale zeroed by one mod and then changed by another is the exception:
+-- value never goes below $0.)
 
 local Rules = {}
 Rules.__index = Rules
@@ -25,7 +27,8 @@ local function isScalar(v)
   return t ~= 'table' and t ~= 'function'
 end
 
--- base: the run's own numbers, before any mod touches them ({ basePower }).
+-- base: the run's own numbers, before any mod touches them:
+--   { basePower = watts, portRate = { item = multiplier } }
 function Rules.new(mods, base)
   local r = setmetatable({
     mods = mods or {}, state = {}, extra = {}, owner = {}, recipeOwner = {},
@@ -33,10 +36,14 @@ function Rules.new(mods, base)
   r.shiftLen = Contracts.shiftLen
   r.shifts = Contracts.shifts
   r.basePower = base and base.basePower or Contracts.basePower
+  r.portRate = base and base.portRate or {}
   r.maxPolish = 1
   r.exportPeriod = 1
   r.leakEvery = nil
   r.oven = false
+  r.demandBonus = 0            -- added to the multiplier of products in demand
+  r.demandUnlimited = false    -- demand pays on every unit
+  r.slumpMult = nil            -- replaces the multiplier of the slumped product
   for _, m in ipairs(r.mods) do
     if m.setup then
       local before = {}
@@ -60,10 +67,12 @@ function Rules:addRecipe(kind, recipe)
   if self.setting then self.recipeOwner[recipe] = self.setting end
 end
 
+-- Added recipes come first: where one shares its input with a standard
+-- recipe, it is the one the machine uses.
 function Rules:recipesFor(kind)
   local out = {}
-  for _, r in ipairs(Recipes[kind] or {}) do out[#out + 1] = r end
   for _, r in ipairs(self.extra[kind] or {}) do out[#out + 1] = r end
+  for _, r in ipairs(Recipes[kind] or {}) do out[#out + 1] = r end
   return out
 end
 
@@ -102,6 +111,7 @@ function Rules:sale(it, tick, len, info)
     type = it.type, polished = it.polished, dist = it.dist,
     tick = tick, len = len, mats = {}, units = units,
     premium = info and info.premium or nil,
+    rules = self,
   }
   for _, m in ipairs(def.mats) do ctx.mats[m] = true end
   ctx.plain = def.value * scale
@@ -129,12 +139,9 @@ function Rules:sale(it, tick, len, info)
       if ctx.value ~= v0 then fired = credit(fired, m, ctx.value - v0) end
     end
   end
-  -- Rounding goes to the last mod that fired, so the credits stay exact.
-  local exact = ctx.value
-  ctx.value = math.max(0, math.floor(exact + 0.5))
-  if fired then
-    fired[#fired].delta = fired[#fired].delta + (ctx.value - exact)
-  end
+  -- Sales keep their cents: a percentage on a $1 item still counts. Only
+  -- the shift total is rounded.
+  ctx.value = math.max(0, ctx.value)
   for i = 1, #mods do
     if mods[i].sold then mods[i].sold(s, ctx) end
   end
@@ -171,7 +178,8 @@ function Rules:affecting(F, e)
       if w ~= watts then hit = true end
       watts = w
     end
-    if hit then
+    -- Investments and mods that change every machine are not marked one by one.
+    if hit and not m.quiet and not m.noPips then
       out = out or {}
       out[#out + 1] = m
     end

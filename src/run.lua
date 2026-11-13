@@ -11,6 +11,8 @@ local Rules = require 'src.rules'
 local Rng = require 'src.rng'
 local Machines = require 'src.data.machines'
 local Upgrades = require 'src.data.upgrades'
+local Investments = require 'src.data.investments'
+local Alternates = require 'src.data.alternates'
 local Contracts = require 'src.data.contracts'
 
 local Run = {}
@@ -25,9 +27,9 @@ function Run.new(seed)
   r.credits = Contracts.startCredits
   r.blueprints = {}          -- machine kinds unlocked for the run
   for _, kind in ipairs(Contracts.startBlueprints) do r.blueprints[kind] = true end
-  r.power = Contracts.basePower
-  r.powerBought = 0
-  r.upgrades = {}            -- upgrade ids, in slot order
+  r.upgrades = {}            -- module ids, in slot order
+  r.levels = {}              -- investment id -> level
+  r.recipes = {}             -- alternate recipe ids, in the order bought
   r.index = 1                -- current contract
   r.progress = 0             -- revenue banked on the current contract
   r.shiftsUsed = 0
@@ -73,21 +75,26 @@ function Run:contract(index)
   }
 end
 
--- Watts the site supplies before any mod: bought power plus power nodes.
+-- Watts the site supplies before any mod: the grid, what was invested in
+-- it, and power nodes.
 function Run:basePower()
-  return self.power + self.map:nodes() * Map.NODE_WATTS
+  return Contracts.basePower + Investments.watts(self.levels) + self.map:nodes() * Map.NODE_WATTS
 end
 
 -- Active rule set, in the order the rules apply to a sale: the site's own
--- rules, the market, upgrades left to right, then the boss twist.
+-- rules, investments, the market, alternate recipes, modules left to right,
+-- then the boss twist. A product in demand is tripled after its material
+-- bonuses, and a module's multiplier lands on top of both.
 function Run:refreshRules()
   local mods = {}
   if self.map.premium > 0 then mods[#mods + 1] = Contracts.premium end
+  for _, mod in ipairs(Investments.mods(self.levels)) do mods[#mods + 1] = mod end
   if self.market then mods[#mods + 1] = Market.mod(self.market) end
+  for _, id in ipairs(self.recipes) do mods[#mods + 1] = Alternates.byId[id] end
   for _, id in ipairs(self.upgrades) do mods[#mods + 1] = Upgrades.byId[id] end
   local c = self:contract()
   if c.boss then mods[#mods + 1] = c.boss end
-  self.rules = Rules.new(mods, { basePower = self:basePower() })
+  self.rules = Rules.new(mods, { basePower = self:basePower(), portRate = Investments.rates(self.levels) })
   return self.rules
 end
 
@@ -243,7 +250,7 @@ end
 
 function Run:beginShift()
   self.shiftsUsed = self.shiftsUsed + 1
-  self.factory:beginShift(self:refreshRules())
+  self.factory:beginShift(self:refreshRules(), { shiftNo = self.shiftsUsed })
 end
 
 -- Returns the shift summary with .status = 'next' | 'cleared' | 'failed'.
@@ -302,34 +309,60 @@ end
 
 ---------------------------------------------------------------- shop
 
--- 2 blueprints not owned yet (fewer when they run out) and 2 upgrades.
+function Run:hasRecipe(id)
+  for _, r in ipairs(self.recipes) do
+    if r == id then return true end
+  end
+  return false
+end
+
+-- One blueprint or alternate recipe, 2 modules, 3 investments.
+--   offer = { type = 'blueprint' | 'recipe' | 'upgrade' | 'invest', id, cost, sold }
 function Run:rollShop()
   local rng = self.shopRng
   local offers = {}
+
+  -- Slot 1: a machine you cannot build yet, or a new recipe for one you can.
   local pool = {}
   for _, kind in ipairs(Machines.list) do
     local def = Machines[kind]
     if def.cost and not self.blueprints[kind] and (not def.needs or self.blueprints[def.needs]) then
-      pool[#pool + 1] = { kind, def.weight or 1 }
+      pool[#pool + 1] = { { type = 'blueprint', id = kind, cost = def.cost }, (def.weight or 1) * 2 }
     end
   end
-  for _ = 1, math.min(2, #pool) do
-    local kind = rng:weighted(pool)
-    for i, entry in ipairs(pool) do
-      if entry[1] == kind then table.remove(pool, i); break end
+  for _, alt in ipairs(Alternates.list) do
+    if not self:hasRecipe(alt.id) and self:unlocked(alt.kind) then
+      pool[#pool + 1] = { { type = 'recipe', id = alt.id, cost = alt.cost }, 2 }
     end
-    offers[#offers + 1] = { type = 'blueprint', id = kind, cost = Machines[kind].cost }
   end
+  if #pool > 0 then offers[#offers + 1] = rng:weighted(pool) end
+
+  -- Slots 2-3: modules you do not hold.
   local owned = {}
   for _, id in ipairs(self.upgrades) do owned[id] = true end
   local ups = {}
   for _, u in ipairs(Upgrades.list) do
-    if not owned[u.id] then ups[#ups + 1] = u end
+    if not owned[u.id] then ups[#ups + 1] = { u, Upgrades.WEIGHT[u.rarity] } end
   end
-  rng:shuffle(ups)
-  for i = 1, math.min(2, #ups) do
-    offers[#offers + 1] = { type = 'upgrade', id = ups[i].id, cost = ups[i].cost }
+  for _ = 1, math.min(2, #ups) do
+    local u = rng:weighted(ups)
+    for i, entry in ipairs(ups) do
+      if entry[1] == u then table.remove(ups, i); break end
+    end
+    offers[#offers + 1] = { type = 'upgrade', id = u.id, cost = u.cost }
   end
+
+  -- Slots 4-6: investments that would do something on this site.
+  local resources, kinds = self:resources(), self:kinds()
+  local inv = {}
+  for _, def in ipairs(Investments.list) do
+    if Investments.eligible(def, self.levels[def.id] or 0, resources, kinds) then inv[#inv + 1] = def end
+  end
+  rng:shuffle(inv)
+  for i = 1, math.min(3, #inv) do
+    offers[#offers + 1] = { type = 'invest', id = inv[i].id, cost = Investments.cost(inv[i], self.levels[inv[i].id] or 0) }
+  end
+
   self.shop = self.shop or { rerolls = 0 }
   self.shop.offers = offers
   return self.shop
@@ -353,12 +386,13 @@ function Run:reroll()
   return true
 end
 
--- Why offer i cannot be bought, or nil if it can.
+-- Why offer i cannot be bought outright, or nil if it can. 'slots full'
+-- means a module has to make room: see Run:replaceUpgrade.
 function Run:buyBlocked(i)
   local o = self.shop.offers[i]
   if not o or o.sold then return 'sold' end
+  if o.type == 'upgrade' and #self.upgrades >= Upgrades.slots then return 'slots full' end
   if self.credits < o.cost then return 'too expensive' end
-  if o.type == 'upgrade' and #self.upgrades >= Contracts.upgradeSlots then return 'slots full' end
   return nil
 end
 
@@ -369,6 +403,10 @@ function Run:buy(i)
   o.sold = true
   if o.type == 'blueprint' then
     self.blueprints[o.id] = true
+  elseif o.type == 'recipe' then
+    self.recipes[#self.recipes + 1] = o.id
+  elseif o.type == 'invest' then
+    self.levels[o.id] = (self.levels[o.id] or 0) + 1
   else
     self.upgrades[#self.upgrades + 1] = o.id
   end
@@ -380,22 +418,27 @@ function Run:sellUpgrade(slot)
   local id = self.upgrades[slot]
   if not id then return false end
   table.remove(self.upgrades, slot)
-  self.credits = self.credits + math.floor(Upgrades.byId[id].cost / 2)
+  self.credits = self.credits + Upgrades.refund(Upgrades.byId[id])
   self:refreshRules()
   return true
 end
 
--- Power is bought in steps; each one costs a credit more than the last.
-function Run:powerCost()
-  return Contracts.powerCost + self.powerBought
+-- Can module offer i take the place of the module in `slot`? The refund
+-- for the old one counts towards the price.
+function Run:canReplace(slot, i)
+  local o, id = self.shop.offers[i], self.upgrades[slot]
+  if not o or o.sold or o.type ~= 'upgrade' or not id then return false end
+  return self.credits + Upgrades.refund(Upgrades.byId[id]) >= o.cost
 end
 
-function Run:buyPower()
-  local cost = self:powerCost()
-  if self.credits < cost then return false end
-  self.credits = self.credits - cost
-  self.powerBought = self.powerBought + 1
-  self.power = self.power + Contracts.powerStep
+-- Sell the module in `slot` and put offer i in its place, keeping the order
+-- of the others.
+function Run:replaceUpgrade(slot, i)
+  if not self:canReplace(slot, i) then return false end
+  local o = self.shop.offers[i]
+  self.credits = self.credits + Upgrades.refund(Upgrades.byId[self.upgrades[slot]]) - o.cost
+  self.upgrades[slot] = o.id
+  o.sold = true
   self:refreshRules()
   return true
 end

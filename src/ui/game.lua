@@ -139,6 +139,9 @@ local function upgradeTip(def)
   return { title = def.name, color = P[def.color], lines = { def.desc } }
 end
 
+-- All investments show as one row of the ledger.
+local INVESTED = { name = 'Investments', color = 'green' }
+
 local STATUS = { work = 'WORKING', idle = 'WAITING FOR INPUT', blocked = 'OUTPUT BLOCKED' }
 
 local function entityTip(app, e)
@@ -147,8 +150,9 @@ local function entityTip(app, e)
   local tip = kindTip(e.building.kind)
   if e.port then
     tip.title = Items[e.port.item].name .. ' PORT'
-    tip.lines = { perMin(e.port.period) .. ': ' ..
-      floor(app.run.rules.shiftLen / e.port.period) .. ' PER SHIFT' }
+    local rate = F:portRate(e, app.run.rules)
+    tip.lines = { num(floor(rate * 600 + 0.5) / 10) .. '/MIN: ' ..
+      floor(app.run.rules.shiftLen * rate + 0.5) .. ' PER SHIFT' }
     if live then tip.lines[2] = 'SENT ' .. e.port.sent end
   elseif e.export then
     if live then tip.lines[#tip.lines + 1] = 'SOLD ' .. e.export.sold end
@@ -751,7 +755,7 @@ local function drawBoard(app)
   -- added the most when one did, green for a plain sale.
   for _, p in ipairs(g.popups) do
     local label, color = '+$' .. Fmt.num(p.value), p.color or P.green
-    if p.value == 0 then label, color = '$0', P.red end
+    if p.value < 0.005 then label, color = '$0', P.red end
     local px, py = tilePos(g, p.x, p.y)
     local x = px + T / 2 - Font.width(label) / 2
     x = max(VX + 1, min(x, VX + VW - Font.width(label) - 2))
@@ -845,6 +849,15 @@ local function ledgerRows(app)
   if run.market then add(Market.mod(run.market)) end
   for _, id in ipairs(run.upgrades) do add(Upgrades.byId[id]) end
   add(Contracts.premium)
+  local invested
+  for _, mod in ipairs(run.rules.mods) do
+    local rec = mod.investment and ledger[mod]
+    if rec then
+      invested = invested or { mod = INVESTED, delta = 0, n = 0, i = #rows + 1 }
+      invested.delta, invested.n = invested.delta + rec.delta, invested.n + rec.n
+    end
+  end
+  if invested then rows[#rows + 1] = invested end
   local boss = run:contract().boss
   if boss then add(boss) end
   return #rows > 0 and rows or nil
@@ -888,7 +901,7 @@ local function drawSidebar(app)
   -- Upgrades. A card pops when its upgrade triggers.
   UI.text('UPGRADES', x0, 31, P.dim)
   g.hoverMod = nil
-  for i = 1, Contracts.upgradeSlots do
+  for i = 1, Upgrades.slots do
     local x, y = x0 + ((i - 1) % 3) * 19, 38 + floor((i - 1) / 3) * 18
     local id = run.upgrades[i]
     if id then

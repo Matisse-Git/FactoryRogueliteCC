@@ -13,6 +13,7 @@ return function(App)
   local Panel = require 'src.ui.settings'
   local Pause = require 'src.ui.pause'
   local Board = require 'src.ui.board'
+  local Shop = require 'src.ui.shop'
   local Crt = require 'src.gfx.crt'
   local Contracts = require 'src.data.contracts'
   local Upgrades = require 'src.data.upgrades'
@@ -364,42 +365,58 @@ return function(App)
     click(Board.at(2))
     expect('board: TAKE picks that contract and opens the shop',
       App.state == 'shop' and App.run.chosen == App.run.offers[2])
-    click(159, 10)
+    click(Shop.at.menu)
     expect('shop: MENU opens the pause menu', App.overlay == 'pause')
     App.keypressed('escape')
     expect('shop: Esc closes it again', App.overlay == nil and App.state == 'shop')
 
     ---------------------------------------------------------- shop
-    App.run.credits = 40
-    App.move(8 + 2 * 77 + 20, 50)
+    local run = App.run
+    run.credits = 60
+    local offers = run.shop.offers
+    expect('shop: a blueprint or recipe, two modules, three investments',
+      #offers == 6 and (offers[1].type == 'blueprint' or offers[1].type == 'recipe')
+      and offers[2].type == 'upgrade' and offers[3].type == 'upgrade' and offers[6].type == 'invest')
+    App.move(Shop.offerXY(App, 2))
     wait(2)
     shot('06_shop')
-    local offered = App.run.shop.offers[1].id
-    expect('shop: the first offer is a blueprint not owned yet',
-      App.run.shop.offers[1].type == 'blueprint' and not App.run:unlocked(offered))
-    click(44, 79)
-    expect('shop: BUY unlocks the blueprint', App.run:unlocked(offered) and App.run.shop.offers[1].sold)
-    local watts = App.run.power
-    click(118, 99)
-    expect('shop: POWER adds watts', App.run.power == watts + Contracts.powerStep)
-    click(8 + 2 * 77 + 36, 79)
-    expect('shop: BUY adds an upgrade', #App.run.upgrades == 1)
-    click(30, 99)
-    expect('shop: REROLL rolls new offers', App.run.shop.rerolls == 1 and not App.run.shop.offers[1].sold)
-    for i = 3, 4 do App.run:buy(i) end
-    App.run:reroll()
-    for i = 3, 4 do App.run:buy(i) end
-    App.run.credits = 99
-    for i = 3, 4 do App.run:buy(i) end
-    local owned, credits = #App.run.upgrades, App.run.credits
-    click(16 + 19, 127, 2)
-    expect('shop: right click sells an upgrade',
-      #App.run.upgrades == owned - 1 and App.run.credits > credits)
-    App.run.credits = 9
-    App.move(16, 127)
+    local first = offers[1]
+    click(Shop.offerXY(App, 1))
+    expect('shop: BUY takes the blueprint or recipe',
+      first.sold and (run:unlocked(first.id) or run:hasRecipe(first.id)))
+    click(Shop.offerXY(App, 2))
+    expect('shop: BUY adds a module', #run.upgrades == 1 and run.upgrades[1] == offers[2].id)
+    local inv = offers[4].id
+    click(Shop.offerXY(App, 4))
+    expect('shop: BUY raises an investment a level', run.levels[inv] == 1 and offers[4].sold)
+    click(Shop.at.reroll)
+    expect('shop: REROLL rolls all six again', run.shop.rerolls == 1 and not run.shop.offers[1].sold
+      and not run.shop.offers[4].sold)
+
+    -- Selling, and replacing once the five slots are full.
+    local credits = run.credits
+    click(Shop.sellXY(1))
+    expect('shop: SELL pays back half', #run.upgrades == 0 and run.credits > credits)
+    run.upgrades = { 'bullion', 'middleman', 'monopoly', 'embargo', 'last_call' }
+    run:refreshRules()
+    run.credits = 30
+    local wanted = run.shop.offers[2].id
+    click(Shop.offerXY(App, 2))
+    expect('shop: with five modules, buying asks which one goes',
+      run.shop.replace == 2 and #run.upgrades == 5 and run.credits == 30)
+    App.move(Shop.slotXY(3))
+    wait(2)
+    shot('07_shop_replace')
+    App.keypressed('escape')
+    expect('shop: Esc takes the question back', run.shop.replace == nil and App.overlay == nil)
+    click(Shop.offerXY(App, 2))
+    click(Shop.slotXY(3))
+    expect('shop: clicking a module swaps it out, in place',
+      run.upgrades[3] == wanted and #run.upgrades == 5 and run.shop.replace == nil and run.credits < 30)
+    App.move(200, 158)
     wait(2)
     shot('07_shop_bought')
-    click(270, 171)
+    click(Shop.at.next)
     expect('shop: NEXT CONTRACT moves on', App.state == 'game' and App.run.index == 2)
 
     ---------------------------------------------------------- new land
