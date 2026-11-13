@@ -10,7 +10,9 @@ Contracts.quotas = { 120, 220, 340, 550, 850, 1200, 1800, 2600, 3600 }
 Contracts.perSector = 3
 Contracts.shifts = 3        -- shifts per contract
 Contracts.shiftLen = 60     -- seconds (ticks) per shift
-Contracts.basePower = 16    -- watts supplied by the board itself (starter kit draws 9)
+Contracts.basePower = 16    -- watts the run starts with
+Contracts.powerStep = 8     -- watts per power purchase in the shop
+Contracts.powerCost = 4     -- its first price; +1 per purchase
 
 -- Raw resources on the input ports of each sector.
 -- A nested list means "pick one of these with the run's seed".
@@ -24,7 +26,7 @@ Contracts.sectorPorts = {
 -- Payout in credits.
 Contracts.reward = { normal = 5, boss = 8, perUnusedShift = 2, interestPer = 5, interestCap = 5 }
 Contracts.startCredits = 4
-Contracts.startKit = { smelter = 2, press = 1, splitter = 1, bridge = 1 }
+Contracts.startBlueprints = { 'smelter', 'press' }
 Contracts.upgradeSlots = 5
 Contracts.rerollCost = 2
 

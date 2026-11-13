@@ -35,12 +35,16 @@ lovec . --shots
 - A run is **9 contracts** in 3 sectors. Every third contract is a boss with a twist.
 - Each contract gives you **3 shifts of 60 seconds** to earn its **revenue quota**.
 - **Build** with time stopped, press **Run**, watch the shift, then rebuild before the next one.
-  Items are cleared at the start of every shift; the same layout always earns the same amount.
+  The same layout always earns the same amount.
+- **Shifts start warm**: the factory runs until it is flowing before the clock starts, so a shift
+  earns exactly its steady rates times 60 seconds. A port at 30/min sells 30 items, however long the belt.
 - Raw items enter from **ports** on the left. Everything that reaches the **export** is sold.
-- **Machines are owned pieces**: you place, move and rotate them for free. Belts are unlimited.
-- **Power**: machines draw watts while crafting. Over the limit, every machine slows down in proportion.
+- **Blueprints**: a machine you have the blueprint for can be placed any number of times, for free.
+  Belts, splitters, bridges and generators need no blueprint.
+- **Power is the budget**: machines draw watts while crafting. Over the limit, every machine slows
+  down in proportion, so the question is always which machines the watts are best spent on.
 - Clearing a contract pays **credits** (plus a bonus per unused shift and interest on savings).
-  The **shop** offers 2 machines and 2 upgrades. You hold at most 5 upgrades.
+  The **shop** offers 2 blueprints, 2 upgrades and more power. You hold at most 5 upgrades.
 - Miss a quota and the run is over. Runs are seeded.
 
 ### Reading your upgrades
@@ -57,8 +61,16 @@ lovec . --shots
   **pip** in its colour, while building too. Hover the card to outline them.
 - The **shift summary** plays end-of-shift upgrades one line at a time, met or not.
 
-Numbers worth knowing: a belt carries 1 item/s, a port supplies 1 item per 2 s,
-a smelter takes 4 s, a press 3 s, an assembler 6 s. The recipe book (Tab) has the rest.
+### Reading your factory
+
+The game states every rate per minute and measures what actually happened; it never plans for you.
+
+- Hover a machine, a port or a palette entry for its rate and watts. A belt carries 60/min, a port
+  supplies 30/min, a smelter makes 15/min, a press 20/min, an assembler 10/min.
+- During a shift the top bar shows what the factory earns per second.
+- Hover a machine during or after a shift for the share of the shift it spent working; hover a belt
+  for how full it ran. **U** prints that share on every machine at once (green from 90%).
+- The recipe book (Tab) has every recipe and sell value.
 
 ## Controls
 
@@ -67,7 +79,8 @@ a smelter takes 4 s, a press 3 s, an assembler 6 s. The recipe book (Tab) has th
 | Left click | Place the selected piece; drag to lay belts; with nothing selected, pick a piece up |
 | Right click | Remove (drag to erase); off the board, deselect |
 | R / mouse wheel | Rotate the selected piece, or the piece under the cursor |
-| 1–9 | Select a piece from the kit |
+| 1–9 | Select a piece from the palette |
+| U | Show how busy each machine was |
 | Q / Esc | Deselect |
 | Esc (nothing selected) / MENU button | Pause menu: resume, settings, abandon run |
 | X | Clear the board |
@@ -100,7 +113,7 @@ main.lua, conf.lua     entry point and window setup
 src/ecs.lua            entities, component queries, systems
 src/sim/               the simulation (no graphics): factory, belts, machines
 src/rules.lua          hook dispatcher for upgrades and boss twists
-src/run.lua            run state: kit, credits, contracts, shop
+src/run.lua            run state: blueprints, credits, contracts, shop
 src/settings.lua       player settings and their file
 src/data/              ALL content and balance: items, recipes, machines,
                        upgrades, contracts (quotas, bosses, payouts)
@@ -142,5 +155,7 @@ with its own change in slot order, and the credits add up to the shift total.
 
 ## Status
 
-Prototype. Quotas are tuned for the first sector only; later sectors are a
-first guess. No audio, no saved runs, no meta-progression. Art is placeholder.
+Version 1.0 is being built on the `v1-overhaul` branch, one milestone at a time.
+Done so far: blueprints, power as the budget, warm-start shifts, rates and
+utilisation on screen. Quotas are not yet retuned for any of it. No audio, no
+saved runs. Art is placeholder.

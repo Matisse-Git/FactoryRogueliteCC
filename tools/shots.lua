@@ -134,7 +134,10 @@ return function(App)
     click(cellXY(8, 7))
     expect('place: smelter lands on the board', F:at(8, 7) and F:at(8, 7).machine ~= nil)
     click(cellXY(9, 7))
-    expect('place: tool clears when the kit runs out', App.g.tool == nil and App.run:available('smelter') == 0)
+    click(cellXY(10, 7))
+    expect('place: a blueprint builds any number', App.g.tool == 'smelter' and #F.world:query('machine') == 3)
+    App.keypressed('q')
+    expect('keys: Q puts the tool away', App.g.tool == nil)
     click(cellXY(8, 7))
     expect('pick up: clicking a machine lifts it', App.g.tool == 'smelter' and F:at(8, 7) == nil)
     click(cellXY(8, 2))
@@ -171,6 +174,9 @@ return function(App)
     App.keypressed('x')
 
     ---------------------------------------------------------- contract 1
+    local Contracts = require 'src.data.contracts'
+    local quota1 = Contracts.quotas[1]
+    Contracts.quotas[1] = 99999      -- out of reach, so the first shift cannot clear it
     autoBuild()
     App.g.tool, App.g.dir = 'splitter', 1
     App.move(cellXY(6, 5))
@@ -199,13 +205,25 @@ return function(App)
     expect('the shift ends on its own', App.g.mode == 'summary')
     App.g.speed = 1
     shot('05_summary')
+    local smelter
+    for _, e in ipairs(F.world:query('machine')) do
+      if e.building.kind == 'smelter' then smelter = e end
+    end
+    expect('warm start: the smelter worked the whole shift', F:utilisation(smelter) == 1)
     local earned = App.run.progress
     expect('shift earned revenue', earned > 0)
 
     click(170, 157)
     expect('NEXT SHIFT returns to build mode', App.g.mode == 'build' and App.run.shiftsUsed == 1)
+    App.keypressed('u')
+    App.move(cellXY(3, F.world:query('port')[1].pos.y))
+    wait(2)
+    expect('keys: U shows how busy each machine was', App.g.stats == true)
+    shot('05a_utilisation')
+    App.keypressed('u')
 
-    App.run.progress = 9999          -- bank enough to clear the contract
+    Contracts.quotas[1] = quota1
+    App.run.progress = quota1        -- bank enough to clear the contract
     App.keypressed('space')
     expect('keys: Space runs the shift', App.g.mode == 'run')
     Game.fastForward(App)
@@ -223,12 +241,14 @@ return function(App)
     App.move(8 + 2 * 77 + 20, 50)
     wait(2)
     shot('06_shop')
-    local kitBefore = 0
-    for _, n in pairs(App.run.kit) do kitBefore = kitBefore + n end
+    local offered = App.run.shop.offers[1].id
+    expect('shop: the first offer is a blueprint not owned yet',
+      App.run.shop.offers[1].type == 'blueprint' and not App.run:unlocked(offered))
     click(44, 79)
-    local kitAfter = 0
-    for _, n in pairs(App.run.kit) do kitAfter = kitAfter + n end
-    expect('shop: BUY adds a machine to the kit', kitAfter == kitBefore + 1 and App.run.shop.offers[1].sold)
+    expect('shop: BUY unlocks the blueprint', App.run:unlocked(offered) and App.run.shop.offers[1].sold)
+    local watts = App.run.power
+    click(118, 99)
+    expect('shop: POWER adds watts', App.run.power == watts + Contracts.powerStep)
     click(8 + 2 * 77 + 36, 79)
     expect('shop: BUY adds an upgrade', #App.run.upgrades == 1)
     click(30, 99)
@@ -269,8 +289,7 @@ return function(App)
     for yy = 0, Factory.H - 1 do
       for xx = 0, Factory.W - 1 do App.run.factory:remove(xx, yy) end
     end
-    App.run.kit.generator = 1
-    App.run.kit.assembler = 1
+    App.run.blueprints.assembler = true
     autoBuild()
     App.move(244, 104)
     wait(2)
@@ -289,7 +308,6 @@ return function(App)
 
     ---------------------------------------------------------- upgrade feedback
     local Upgrades = require 'src.data.upgrades'
-    local Contracts = require 'src.data.contracts'
     local U = Upgrades.byId
     local function clearBoard()
       for yy = 0, Factory.H - 1 do
@@ -323,7 +341,6 @@ return function(App)
     -- Build mode: machines changed by a static modifier carry pips.
     Game.afterSummary(App)
     clearBoard()
-    App.run.kit = { smelter = 4, press = 2, splitter = 1, bridge = 1, generator = 1, assembler = 1 }
     App.run.upgrades = { 'assembly_line', 'direct_drive', 'isolation' }
     App.run:refreshRules()
     autoBuild()

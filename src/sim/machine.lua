@@ -14,6 +14,7 @@ function M.reset(e)
   m.burn = 0          -- generator: seconds of fuel left
   m.made = 0
   m.idle = 0          -- ticks spent not crafting after the first craft
+  m.busy = 0          -- ticks spent crafting (see Factory:utilisation)
   m.started = false
   m.status = 'idle'   -- 'work' | 'idle' | 'blocked'
   m.speed = 1
@@ -140,6 +141,7 @@ function M.update(F, e)
 
   local carry = 0
   if m.craft then
+    m.busy = m.busy + 1
     m.craft.p = m.craft.p + F.shift.factor * m.speed
     if m.craft.p >= def.time then
       carry = m.craft.p - def.time

@@ -41,11 +41,21 @@ function Game.enter(app)
     mode = 'intro', tool = nil, dir = 0, speed = speed,
     acc = 0, frac = 0, paused = false,
     popups = {}, summary = nil, drag = nil, book = false,
+    stats = app.g and app.g.stats or false,   -- U: utilisation on every machine
     fx = Fx.new(),      -- card pops and tile flashes
     reveal = nil,       -- summary playback, see finishShift
     lit = {},           -- mods changing a machine on the board this frame
     hoverMod = nil,     -- the upgrade whose card is under the mouse
   }
+end
+
+-- Items per minute, as the game states every rate.
+local function perMin(seconds)
+  return num(floor(600 / seconds + 0.5) / 10) .. '/MIN'
+end
+
+local function pct(u)
+  return floor(u * 100 + 0.5) .. '%'
 end
 
 local function cellAt(x, y)
@@ -59,7 +69,7 @@ local function kindTip(kind)
   local def = Machines[kind]
   local lines = { def.desc }
   if def.time then
-    lines[#lines + 1] = def.time .. 'S PER CRAFT, ' .. def.draw .. 'W'
+    lines[#lines + 1] = perMin(def.time) .. ', ' .. def.draw .. 'W'
   end
   return { title = def.name, color = P.text, lines = lines }
 end
@@ -76,7 +86,7 @@ local function entityTip(app, e)
   local tip = kindTip(e.building.kind)
   if e.port then
     tip.title = Items[e.port.item].name .. ' PORT'
-    tip.lines = { '1 EVERY ' .. e.port.period .. 'S: ' ..
+    tip.lines = { perMin(e.port.period) .. ': ' ..
       floor(app.run.rules.shiftLen / e.port.period) .. ' PER SHIFT' }
     if live then tip.lines[2] = 'SENT ' .. e.port.sent end
   elseif e.export then
@@ -85,10 +95,19 @@ local function entityTip(app, e)
     local m = e.machine
     tip.lines = { (m.def.generator and 'BURNED ' or 'MADE ') .. m.made, STATUS[m.status] }
     if m.speed ~= 1 then tip.lines[3] = 'SPEED X' .. num(m.speed) end
-    if m.started and m.idle > 0 then tip.lines[#tip.lines + 1] = 'IDLE FOR ' .. m.idle .. 'S' end
+    local u = F:utilisation(e)
+    if u then tip.lines[#tip.lines + 1] = 'BUSY ' .. pct(u) .. ' OF THE SHIFT' end
   elseif e.machine then
     local sp = app.run.rules:speed(F, e)
-    if sp ~= 1 then tip.lines[#tip.lines + 1] = 'SPEED X' .. num(sp) end
+    if e.machine.def.time and sp ~= 1 then
+      tip.lines[#tip.lines] = perMin(e.machine.def.time / sp) .. ', ' .. e.machine.def.draw .. 'W'
+      tip.lines[#tip.lines + 1] = 'SPEED X' .. num(sp)
+    end
+    local u = F:utilisation(e)
+    if u then tip.lines[#tip.lines + 1] = 'LAST SHIFT: BUSY ' .. pct(u) end
+  elseif e.belt and e.slot.passed and F.shift and F.shift.tick > 0 then
+    tip.lines[#tip.lines + 1] = (live and 'CARRIED ' or 'LAST SHIFT: ') .. e.slot.passed ..
+      ' (' .. pct(e.slot.passed / F.shift.tick) .. ' FULL)'
   end
   return tip
 end
@@ -106,7 +125,7 @@ local function defaultTip(app)
   end
   return { title = 'BUILD', color = P.text,
     lines = { 'LEFT CLICK: PLACE, DRAG BELTS, PICK UP.', 'RIGHT CLICK: REMOVE.',
-      'R: ROTATE. TAB: RECIPES.' } }
+      'R: ROTATE. TAB: RECIPES. U: HOW BUSY EACH MACHINE WAS.' } }
 end
 
 ---------------------------------------------------------------- editing
@@ -121,9 +140,9 @@ local function placeAt(app, kind, x, y, dir)
       return true
     end
     if kind == 'belt' or not e.belt then return false end
-    if run:available(kind) <= 0 then return false end
+    if not run:unlocked(kind) then return false end
     F:remove(x, y)                       -- a machine may replace a belt
-  elseif run:available(kind) <= 0 then
+  elseif not run:unlocked(kind) then
     return false
   end
   F:place(kind, x, y, dir)
@@ -402,6 +421,22 @@ local function drawBoard(app)
     end
   end
 
+  -- U: how busy each machine was, as measured (this shift, or the last one).
+  if g.stats then
+    for i = 1, #buildings do
+      local e = buildings[i]
+      local u = e.machine and F:utilisation(e)
+      if u then
+        local label = tostring(floor(u * 100 + 0.5))
+        local x, y = BX + e.pos.x * T, BY + e.pos.y * T
+        local w = Font.width(label)
+        UI.rect(x + 15 - w - 2, y + 8, w + 2, 7, P.dark)
+        UI.text(label, x + 15 - w - 1, y + 9,
+          u >= Factory.BUSY and P.green or (u >= 0.5 and P.yellow or P.red))
+      end
+    end
+  end
+
   Fx.drawFlashes(g.fx, BX, BY, T)
 
   -- Hover, ghost and tooltip.
@@ -412,7 +447,7 @@ local function drawBoard(app)
     local e = F:at(cx, cy)
     if e then UI.tip = entityTip(app, e) end
     if g.mode == 'build' and g.tool then
-      local ok = (not e and run:available(g.tool) > 0)
+      local ok = not e
         or (e and not e.building.fixed and (e.building.kind == g.tool or (e.belt and g.tool ~= 'belt')))
       local ghost = { building = { kind = g.tool, dir = g.dir }, slot = not Machines[g.tool].generator }
       if g.tool == 'belt' or g.tool == 'splitter' or g.tool == 'bridge' then
@@ -482,8 +517,15 @@ local function drawTopBar(app)
   UI.frame(3, 11, bw, 6, P.line)
   UI.text('$' .. earned .. '/' .. c.quota, 3 + bw + 4, 11, earned >= c.quota and P.green or P.text)
 
-  local tick = (g.mode == 'run' or g.mode == 'summary') and F.shift.tick or 0
-  UI.textRight(tick .. '/' .. rules.shiftLen .. 'S', SX - 4, 11, g.mode == 'run' and P.text or P.dim)
+  local live = g.mode == 'run' or g.mode == 'summary'
+  local tick = live and F.shift.tick or 0
+  local clock = tick .. '/' .. rules.shiftLen .. 'S'
+  UI.textRight(clock, SX - 4, 11, g.mode == 'run' and P.text or P.dim)
+  -- What the factory is earning per second, as measured so far.
+  if live and tick > 0 then
+    local rate = F.shift.revenue / tick
+    UI.textRight('$' .. num(floor(rate * 10 + 0.5) / 10) .. '/S', SX - 8 - Font.width(clock), 11, P.gold)
+  end
 end
 
 ---------------------------------------------------------------- drawing: sidebar
@@ -541,33 +583,23 @@ local function drawSidebar(app)
       'DEMAND / SUPPLY. OVER THE LIMIT, EVERY MACHINE SLOWS DOWN IN PROPORTION.' } }
   end
 
-  -- Kit palette.
-  local entries = {}
-  for _, kind in ipairs(Machines.list) do
-    if Machines[kind].free or (run.kit[kind] or 0) > 0 then entries[#entries + 1] = kind end
-  end
+  -- Palette: every kind the run can build, as many of each as you like.
+  local entries = run:palette()
   g.entries = entries
   for i, kind in ipairs(entries) do
     local x = SX + 3 + ((i - 1) % 4) * 23
     local y = 24 + floor((i - 1) / 4) * 21
-    local avail = run:available(kind)
     local sel = g.tool == kind
     UI.rect(x, y, 22, 20, sel and P.line or P.panel2)
     if sel then UI.frame(x, y, 22, 20, P.yellow) end
-    UI.sprite(Sprites.machine[kind], x + 3, y + 2, 0, avail > 0 and 1 or 0.3)
-    if avail ~= math.huge then
-      local label = tostring(avail)
-      local w = Font.width(label)
-      UI.rect(x + 19 - w, y + 13, w + 2, 7, P.dark)
-      UI.text(label, x + 20 - w, y + 14, avail > 0 and P.text or P.red)
-    end
+    UI.sprite(Sprites.machine[kind], x + 3, y + 2)
     if UI.inside(x, y, 22, 20) then
       local tip = kindTip(kind)
       tip.lines[#tip.lines + 1] = 'KEY ' .. i
       UI.tip = tip
     end
     if g.mode == 'build' and UI.clicked(x, y, 22, 20) then
-      g.tool = (not sel and avail > 0) and kind or nil
+      g.tool = (not sel) and kind or nil
     end
   end
 
@@ -790,7 +822,6 @@ function Game.press(app, x, y, b)
     if g.tool then
       placeAt(app, g.tool, cx, cy, g.dir)
       g.drag = { x = cx, y = cy, tool = g.tool }
-      if g.tool ~= 'belt' and app.run:available(g.tool) <= 0 then g.tool = nil end
     else
       local e = F:at(cx, cy)
       if e and not e.building.fixed then       -- pick it up to move it
@@ -840,6 +871,7 @@ function Game.key(app, key)
   local g = app.g
   if key == 'tab' then g.book = not g.book; return end
   if g.book then return end
+  if key == 'u' then g.stats = not g.stats; return end
   if g.mode == 'intro' then
     if key == 'space' or key == 'return' then g.mode = 'build' end
   elseif g.mode == 'build' then
@@ -850,9 +882,7 @@ function Game.key(app, key)
     else
       local n = tonumber(key)
       local kind = n and g.entries and g.entries[n]
-      if kind then
-        g.tool = (g.tool ~= kind and app.run:available(kind) > 0) and kind or nil
-      end
+      if kind then g.tool = (g.tool ~= kind) and kind or nil end
     end
   elseif g.mode == 'run' then
     if key == 'space' then g.paused = not g.paused

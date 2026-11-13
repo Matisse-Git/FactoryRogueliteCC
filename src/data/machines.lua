@@ -1,14 +1,17 @@
 -- Everything that can sit on a board tile.
 --   time  = seconds (ticks) per craft        draw = watts while crafting
---   cost  = shop price                       weight = how often the shop offers it
+--   cost  = shop price of the blueprint      weight = how often the shop offers it
+--   free  = no blueprint needed
+-- A blueprint unlocks a kind for the rest of the run: place as many as the
+-- power and the floor allow.
 
 local Machines = {
   belt = {
     name = 'Belt', free = true,
-    desc = 'Carries 1 item per second. Free and unlimited.',
+    desc = 'Carries 1 item per second.',
   },
   smelter = {
-    name = 'Smelter', time = 4, draw = 3, cost = 4, weight = 3,
+    name = 'Smelter', time = 4, draw = 3, cost = 5, weight = 3,
     desc = 'Ore or dust to ingot.',
   },
   press = {
@@ -16,7 +19,7 @@ local Machines = {
     desc = 'Ingot to part: gear, wire x2 or foil.',
   },
   assembler = {
-    name = 'Assembler', time = 6, draw = 5, cost = 7, weight = 3,
+    name = 'Assembler', time = 6, draw = 5, cost = 8, weight = 3,
     desc = 'Two inputs to a product: steel, motor or circuit.',
   },
   crusher = {
@@ -24,20 +27,20 @@ local Machines = {
     desc = '1 ore to 2 dust. Dust smelts like ore.',
   },
   polisher = {
-    name = 'Polisher', time = 8, draw = 8, cost = 8, weight = 2, polish = true,
+    name = 'Polisher', time = 2, draw = 10, cost = 8, weight = 2, polish = true,
     desc = 'Polishes any item: sells for double.',
   },
   generator = {
-    name = 'Generator', cost = 5, weight = 2,
+    name = 'Generator', free = true,
     generator = { fuel = 'coal', burn = 6, watts = 8 },
     desc = 'Burns 1 coal per 6s for +8W.',
   },
   splitter = {
-    name = 'Splitter', cost = 2, weight = 3,
+    name = 'Splitter', free = true,
     desc = 'In from the back. Alternates between front, left and right.',
   },
   bridge = {
-    name = 'Bridge', cost = 2, weight = 2,
+    name = 'Bridge', free = true,
     desc = 'Lets two belts cross.',
   },
 

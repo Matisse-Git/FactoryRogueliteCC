@@ -26,7 +26,7 @@ local function report(name, rows, ids)
   return s.total
 end
 
--- Starting kit only: 2 smelters, 1 press, 1 splitter (bridge unused).
+-- A small starter line: 2 smelters, 1 press, 1 splitter.
 local STARTER = {
   '.. .. .. .. .. .. .. .. .. .. .. .. .. ..',
   'I> b> y> s> p> b> b> b> b> b> b> b> bv ..',
@@ -46,7 +46,7 @@ local NAIVE = {
   'C> b> b> s> b> b> b> b> b> b> b> b> b^ ..',
 }
 
--- A mid-run kit: 2 smelters, 2 presses, 1 assembler making motors
+-- With the assembler blueprint: 2 smelters, 2 presses, 1 assembler making motors
 -- (gear from the top line, wire from the bottom line).
 local MOTORS = {
   '.. .. .. .. .. .. .. .. .. .. .. .. .. ..',
@@ -76,6 +76,6 @@ return function()
   end
   print('')
   print('quotas (3 shifts each): ' .. table.concat(Contracts.quotas, ', '))
-  print(string.format('starter kit over 3 shifts: naive $%d, tuned $%d', naive * 3, best * 3))
+  print(string.format('starter line over 3 shifts: naive $%d, tuned $%d', naive * 3, best * 3))
   return true
 end

@@ -26,7 +26,7 @@ local function section(app, kind, x, y)
   local def = Machines[kind]
   UI.sprite(Sprites.machine[kind], x, y)
   UI.text(def.name, x + 19, y + 2, P.gold)
-  UI.text(def.time .. 'S, ' .. def.draw .. 'W', x + 19, y + 9, P.dim)
+  UI.text((math.floor(600 / def.time + 0.5) / 10) .. '/MIN, ' .. def.draw .. 'W', x + 19, y + 9, P.dim)
   y = y + 18
   for _, r in ipairs(app.run.rules:recipesFor(kind)) do
     if Items[r.inputs[1][1]].form ~= 'dust' then
@@ -50,10 +50,10 @@ function Book.draw(app)
   y = section(app, 'assembler', 112, 18)
   y = section(app, 'crusher', 112, y)
   local rules = app.run.rules
-  UI.text('POLISHER: VALUE X2' .. (rules.maxPolish > 1 and ', TWICE' or ''), 112, y, P.dim)
-  UI.text('GENERATOR: COAL/6S, +8W', 112, y + 7, P.dim)
-  UI.text('PORT: 1 ITEM / 2S', 112, y + 14, P.dim)
-  UI.text('BELT: 1 ITEM / S', 112, y + 21, P.dim)
+  UI.text('POLISHER: X2 VALUE' .. (rules.maxPolish > 1 and ', TWICE' or ''), 112, y, P.dim)
+  UI.text('GENERATOR: 10 COAL/MIN, +8W', 112, y + 7, P.dim)
+  UI.text('PORT: 30/MIN', 112, y + 14, P.dim)
+  UI.text('BELT: 60/MIN', 112, y + 21, P.dim)
 
   UI.text('SELL VALUES', 226, 18, P.gold)
   local vy = 27

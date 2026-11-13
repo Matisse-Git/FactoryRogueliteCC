@@ -1,4 +1,4 @@
--- Shop between contracts: 2 machines, 2 upgrades, reroll, sell.
+-- Shop between contracts: 2 blueprints, 2 upgrades, power, reroll, sell.
 
 local P = require 'src.gfx.palette'
 local Font = require 'src.gfx.font'
@@ -34,23 +34,24 @@ function Shop.draw(app)
   -- Offers.
   for i, o in ipairs(shop.offers) do
     local x, y, w, h = 8 + (i - 1) * 77, 31, 73, 58
-    local def = o.type == 'machine' and Machines[o.id] or Upgrades.byId[o.id]
+    local def = o.type == 'blueprint' and Machines[o.id] or Upgrades.byId[o.id]
     local hot = UI.inside(x, y, w, h)
     if o.sold then
       UI.panel(x, y, w, h, P.bg, P.faint)
       UI.textCenter('SOLD', x + w / 2, y + 26, P.faint)
     else
       UI.panel(x, y, w, h, P.panel, hot and P.text or P.line)
-      if o.type == 'machine' then
+      if o.type == 'blueprint' then
         UI.sprite(Sprites.machine[o.id], x + 5, y + 5)
       else
         UI.card(def, x + 5, y + 5)
       end
       UI.text(o.type, x + 25, y + 6, P.faint)
-      if o.type == 'machine' then
-        UI.text('OWNED ' .. (run.kit[o.id] or 0), x + 25, y + 13, P.faint)
+      if o.type == 'blueprint' then
+        UI.text('BUILD ANY', x + 25, y + 13, P.faint)
+        UI.text('NUMBER', x + 25, y + 20, P.faint)
       end
-      local ny = y + 25
+      local ny = y + (o.type == 'blueprint' and 29 or 25)
       for _, line in ipairs(Font.wrap(def.name, 16)) do
         UI.text(line, x + 5, ny, o.type == 'upgrade' and P[def.color] or P.text)
         ny = ny + 7
@@ -61,6 +62,9 @@ function Shop.draw(app)
       end
       if hot then
         info = { title = def.name, color = o.type == 'upgrade' and P[def.color] or P.text, text = def.desc }
+        if o.type == 'blueprint' and def.time then
+          info.text = info.text .. ' ' .. (math.floor(600 / def.time + 0.5) / 10) .. '/MIN, ' .. def.draw .. 'W.'
+        end
         if blocked == 'slots full' then info.text = info.text .. ' (UPGRADE SLOTS FULL: SELL ONE FIRST.)' end
       end
     end
@@ -68,6 +72,12 @@ function Shop.draw(app)
 
   local cost = run:rerollCost()
   if UI.button('REROLL $' .. cost, 8, 93, 62, 12, { disabled = run.credits < cost }) then run:reroll() end
+  local pcost = run:powerCost()
+  if UI.button('POWER +' .. Contracts.powerStep .. 'W $' .. pcost, 76, 93, 86, 12,
+      { disabled = run.credits < pcost, color = P.blue }) then
+    run:buyPower()
+  end
+  UI.text('POWER ' .. run.power .. 'W', 168, 96, P.blue)
 
   -- Owned upgrades.
   UI.text('UPGRADES ' .. #run.upgrades .. '/' .. Contracts.upgradeSlots, 8, 111, P.dim)
@@ -87,25 +97,18 @@ function Shop.draw(app)
     end
   end
 
-  -- Kit.
-  UI.text('KIT', 120, 111, P.dim)
+  -- Blueprints.
+  UI.text('BLUEPRINTS', 120, 111, P.dim)
   local n = 0
   for _, kind in ipairs(Machines.list) do
-    local owned = run.kit[kind] or 0
-    if owned > 0 then
-      local x, y = 120 + n * 22, 119
+    if run.blueprints[kind] then
+      local x, y = 120 + n * 19, 119
       n = n + 1
       UI.sprite(Sprites.machine[kind], x, y)
-      local label = tostring(owned)
-      local w = Font.width(label)
-      UI.rect(x + 14 - w, y + 10, w + 2, 7, P.dark)
-      UI.text(label, x + 15 - w, y + 11, P.text)
       if UI.inside(x, y, 18, 18) then
         local def = Machines[kind]
-        info = { title = def.name, color = P.text,
-          text = def.desc .. ' RIGHT-CLICK TO SELL ONE FOR $' .. math.floor(def.cost / 2) .. '.' }
+        info = { title = def.name, color = P.text, text = def.desc .. ' BUILD AS MANY AS POWER ALLOWS.' }
       end
-      if UI.clicked(x, y, 18, 18, 2) then run:sellMachine(kind) end
     end
   end
 

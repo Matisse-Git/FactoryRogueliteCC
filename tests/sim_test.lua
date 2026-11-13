@@ -88,14 +88,19 @@ end
 return function()
   print('simulation tests')
 
-  -- 1. A straight belt: 1 ore every 2s, 12 tiles to the export.
+  -- 1. A straight belt: 1 ore every 2s. The shift starts warm, so the belt
+  -- is already full and the shift sells exactly its rate times its length.
   do
     local F = Factory.new()
     F:place('port', 0, 2, 0, { item = 'iron_ore' })
     belts(F, 1, 12, 2)
     F:place('export', 13, 2, 2)
     local s = runShift(F)
-    check('straight belt sells 24 ore for $24', s.total == 24, soldString(s))
+    check('straight belt sells 30 ore for $30', s.total == 30, soldString(s))
+    F:beginShift(Rules.new({}), { warm = 0 })
+    while not F:finished() do F:step() end
+    s = F:endShift()
+    check('a cold start loses the travel time (24 ore)', s.total == 24, soldString(s))
   end
 
   -- 2. Smelter fed directly by a port: 4s per ingot.
@@ -106,7 +111,8 @@ return function()
     F:place('export', 2, 2, 2)
     local s = runShift(F)
     local n = s.sold.iron_ingot and s.sold.iron_ingot.n or 0
-    check('one smelter makes 14 ingots in a shift', n == 14, soldString(s))
+    check('one smelter makes 15 ingots in a shift', n == 15, soldString(s))
+    check('and it never stops', F:utilisation(F:at(1, 2)) == 1, F:utilisation(F:at(1, 2)))
   end
 
   -- 3. Two smelters behind a splitter keep up with one port.
@@ -120,7 +126,7 @@ return function()
     F:place('export', 2, 3, 2)
     local s = runShift(F)
     local n = s.sold.iron_ingot and s.sold.iron_ingot.n or 0
-    check('splitter + 2 smelters make 26+ ingots', n >= 26 and n <= 30, soldString(s))
+    check('splitter + 2 smelters make all 30 ingots', n == 30, soldString(s))
   end
 
   -- 4. Side merge is fair: two ports into one belt.
@@ -203,17 +209,19 @@ return function()
       return F
     end
     local s = runShift(straight(), rules('fools_gold'))
-    check("Fool's Gold: iron ore sells as gold ore", s.total == 48 and s.sold.gold_ore ~= nil, soldString(s))
+    check("Fool's Gold: iron ore sells as gold ore", s.total == 60 and s.sold.gold_ore ~= nil, soldString(s))
     s = runShift(straight(), rules('scrap_dealer'))
-    check('Scrap Dealer: ore sells as ingot', s.total == 72, soldString(s))
+    check('Scrap Dealer: ore sells as ingot', s.total == 90, soldString(s))
     s = runShift(straight(), rules('fools_gold', 'scrap_dealer'))
-    check('both: iron ore sells as gold ingot', s.total == 24 * 8, soldString(s))
+    check('both: iron ore sells as gold ingot', s.total == 30 * 8, soldString(s))
     s = runShift(straight(), rules('monopoly'))
-    check('Monopoly doubles a single-type shift', s.total == 48 and s.mult == 2, soldString(s))
+    check('Monopoly doubles a single-type shift', s.total == 60 and s.mult == 2, soldString(s))
     s = runShift(straight(), rules('scenic_route'))
-    check('Scenic Route pays for distance', s.total == 24 * (1 + 3), soldString(s))
+    check('Scenic Route pays for distance', s.total == 30 * (1 + 3), soldString(s))
     s = runShift(straight(), rules('overtime'))
-    check('Overtime lengthens the shift', s.total > 24, soldString(s))
+    check('Overtime lengthens the shift', s.total > 30, soldString(s))
+    s = runShift(straight(), rules('minimalist'))
+    check('Minimalist pays for unused power (16W spare: +48%)', s.total == 44 and s.spare == nil, soldString(s))
   end
 
   -- 10. Power: demand over supply slows machines down.
@@ -234,7 +242,7 @@ return function()
     local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
 
     local s = runShift(layout({ 'I> o> E<' }))
-    check('polisher doubles value (7 ore for $14)', count(s, 'iron_ore') == 7 and s.total == 14, soldString(s))
+    check('polisher keeps up with a port (30 ore for $60)', count(s, 'iron_ore') == 30 and s.total == 60, soldString(s))
 
     s = runShift(layout({ 'I> o> o> E<' }))
     check('an item cannot be polished twice by default', s.total == 0, soldString(s))
@@ -267,7 +275,23 @@ return function()
     s = runShift(layout({ 'I> s> E<' }), rules('perfect_ratio'))
     check('Perfect Ratio: saturated smelter doubles revenue', s.mult == 2, soldString(s))
     s = runShift(layout({ 'I> s> p> E<' }), rules('perfect_ratio'))
-    check('Perfect Ratio: an idling press does not', s.mult == 1, soldString(s))
+    check('Perfect Ratio: an idling press does not', s.mult == 1 and s.lowest.kind == 'press', soldString(s))
+    -- 4 smelters at 15/min feed 3 presses at 20/min: nothing idles.
+    local ratio = layout({
+      '.. s> b> bv .. .. ..',
+      'I> y> .. bv .. .. ..',
+      '.. s> b> bv p> E< ..',
+      '.. .. .. b> y> p> E<',
+      '.. s> b> b^ p> E< ..',
+      'I> y> .. b^ .. .. ..',
+      '.. s> b> b^ .. .. ..',
+    })
+    s = runShift(ratio, rules('perfect_ratio'))
+    check('16W cannot run 21W of machines flat out (45 gears)', count(s, 'gear') == 45, soldString(s))
+    s = runShift(ratio, Rules.new({ Upgrades.byId.perfect_ratio }, { basePower = 21 }))
+    check('Perfect Ratio: 4 smelters to 3 presses run flat out (60 gears, x2)',
+      count(s, 'gear') == 60 and s.mult == 2 and s.total == 840,
+      soldString(s) .. ', lowest ' .. s.lowest.kind .. ' ' .. math.floor(s.lowest.u * 100) .. '%')
 
     local full = layout({ 'I> b> b> E<' })
     full.world:query('port')[1].port.period = 1
@@ -367,6 +391,26 @@ return function()
     local s = run:endShift()
     check('run API: shift produces revenue', s.total > 0 and run.progress == s.total, s.total)
     check('run API: status is set', s.status == 'next' or s.status == 'cleared', s.status)
+
+    -- Blueprints: a kind is unlocked for the whole run, in any number.
+    check('a run starts with the smelter and press blueprints',
+      run:unlocked('smelter') and run:unlocked('press') and not run:unlocked('assembler'))
+    check('logistics need no blueprint', run:unlocked('belt') and run:unlocked('splitter') and run:unlocked('bridge'))
+    check('fixed pieces cannot be built', not run:unlocked('port') and not run:unlocked('export'))
+    run.credits = 50
+    run:openShop()
+    local bought
+    for i, o in ipairs(run.shop.offers) do
+      if o.type == 'blueprint' and not bought then
+        check('the shop never offers an owned blueprint', not run.blueprints[o.id], o.id)
+        run:buy(i)
+        bought = o.id
+      end
+    end
+    check('buying a blueprint unlocks the machine', bought ~= nil and run:unlocked(bought), bought)
+    local watts, credits = run.rules.basePower, run.credits
+    run:buyPower()
+    check('buying power raises the supply', run.rules.basePower == watts + Contracts.powerStep and run.credits < credits)
     check('quota table matches contract count', #Contracts.quotas == 9)
   end
 
@@ -406,39 +450,39 @@ return function()
     for _, t in ipairs(log) do at[#at + 1] = t.sale end
     check('Bulk Order triggers on exactly every 8th sale', table.concat(at, ',') == '8,16,24', table.concat(at, ','))
     local rec = s.ledger[U.bulk_order]
-    check('Bulk Order is credited $3 a time', rec.n == 3 and near(rec.delta, 9) and s.total == 33, rec.delta)
+    check('Bulk Order is credited $3 a time', rec.n == 3 and near(rec.delta, 9) and s.total == 39, rec.delta)
 
     s, log = watchShift(layout({ 'I> b> b> E<' }), rules('scenic_route'))
     check('Scenic Route stays quiet under 4 tiles', #log == 0 and s.ledger[U.scenic_route].n == 0 and s.total > 0, #log)
     s, log = watchShift(straight(), rules('scenic_route'))
     check('Scenic Route triggers on every sale off a long belt',
-      #log == 24 and near(s.ledger[U.scenic_route].delta, 72) and all(log, function(t) return t.what == 'sale' and t.x == 13 end), #log)
+      #log == 30 and near(s.ledger[U.scenic_route].delta, 90) and all(log, function(t) return t.what == 'sale' and t.x == 13 end), #log)
 
     s, log = watchShift(straight(), rules('gold_standard'))
     check('Gold Standard stays quiet with no gold sold', #log == 0, #log)
 
     s, log = watchShift(straight(), rules('fools_gold'))
-    check("Fool's Gold is credited the difference in type", near(s.ledger[U.fools_gold].delta, 24) and #log == 24, s.ledger[U.fools_gold].delta)
+    check("Fool's Gold is credited the difference in type", near(s.ledger[U.fools_gold].delta, 30) and #log == 30, s.ledger[U.fools_gold].delta)
 
     -- Harmful triggers have a negative delta.
     s, log = watchShift(straight('copper_ore'), rules('embargo'))
     check('Embargo on copper registers as harmful',
-      #log == 24 and all(log, function(t) return t.delta < 0 end) and s.total == 0 and near(s.ledger[U.embargo].delta, -24), s.total)
+      #log == 30 and all(log, function(t) return t.delta < 0 end) and s.total == 0 and near(s.ledger[U.embargo].delta, -30), s.total)
     s, log = watchShift(straight(), rules('embargo'))
-    check('Embargo on iron registers as a gain', #log == 24 and all(log, function(t) return t.delta > 0 end) and s.total == 72, s.total)
+    check('Embargo on iron registers as a gain', #log == 30 and all(log, function(t) return t.delta > 0 end) and s.total == 90, s.total)
     local tariff = boss('tariff')
     s, log = watchShift(straight('copper_ore'), Rules.new({ tariff }))
     check('Tariff is credited to the boss, and is harmful',
-      #log == 24 and all(log, function(t) return t.mod == tariff and t.delta < 0 end) and near(s.ledger[tariff].delta, -24), #log)
+      #log == 30 and all(log, function(t) return t.mod == tariff and t.delta < 0 end) and near(s.ledger[tariff].delta, -30), #log)
     s, log = watchShift(straight('copper_ore'), Rules.new({ U.embargo, tariff }))
-    check('a sale already worth $0 triggers nothing further', s.ledger[tariff].n == 0 and s.ledger[U.embargo].n == 24, s.ledger[tariff].n)
+    check('a sale already worth $0 triggers nothing further', s.ledger[tariff].n == 0 and s.ledger[U.embargo].n == 30, s.ledger[tariff].n)
 
     -- Credit is marginal, in slot order.
     s = watchShift(straight(), rules('fools_gold', 'scrap_dealer'))
-    check("slot order: Fool's Gold first", near(s.ledger[U.fools_gold].delta, 24) and near(s.ledger[U.scrap_dealer].delta, 144) and s.total == 192,
+    check("slot order: Fool's Gold first", near(s.ledger[U.fools_gold].delta, 30) and near(s.ledger[U.scrap_dealer].delta, 180) and s.total == 240,
       s.ledger[U.fools_gold].delta .. ' / ' .. s.ledger[U.scrap_dealer].delta)
     s = watchShift(straight(), rules('scrap_dealer', 'fools_gold'))
-    check('slot order: Scrap Dealer first', near(s.ledger[U.scrap_dealer].delta, 48) and near(s.ledger[U.fools_gold].delta, 120) and s.total == 192,
+    check('slot order: Scrap Dealer first', near(s.ledger[U.scrap_dealer].delta, 60) and near(s.ledger[U.fools_gold].delta, 150) and s.total == 240,
       s.ledger[U.scrap_dealer].delta .. ' / ' .. s.ledger[U.fools_gold].delta)
 
     -- The ledger always adds up, fractions and multipliers included.
@@ -446,7 +490,8 @@ return function()
     check('ledger adds up to the revenue (fractional values)', near(ledgerSum(s), s.total) and s.ledger[U.gold_standard].n > 0,
       ledgerSum(s) .. ' vs ' .. s.total)
     s = watchShift(straight(), rules('fools_gold', 'gold_standard', 'monopoly', 'minimalist'))
-    check('ledger adds up to the total (with a multiplier)', near(ledgerSum(s), s.total) and s.mult == 2, ledgerSum(s) .. ' vs ' .. s.total)
+    check('ledger adds up to the total (with two multipliers)', near(ledgerSum(s), s.total) and near(s.mult, 2 * 1.48),
+      ledgerSum(s) .. ' vs ' .. s.total)
 
     -- End of shift: one result per mod with a shiftEnd hook, fired or not.
     s = watchShift(layout({ 'I> s> E<' }), rules('perfect_ratio'))

@@ -2,6 +2,10 @@
 -- No love.graphics in here, so it runs headless for the tests.
 --
 -- Tick order: cleanup -> ports -> power -> machines -> transfer -> oven.
+--
+-- A shift starts warm: the factory runs for WARMUP ticks first, with nothing
+-- sold or counted, so the measured shift is the steady state and what a
+-- layout earns is its rates times the length of the shift.
 
 local ECS = require 'src.ecs'
 local D = require 'src.sim.dirs'
@@ -13,8 +17,9 @@ local Transfer = require 'src.sim.transfer'
 
 local Factory = {}
 Factory.__index = Factory
-Factory.W, Factory.H = 14, 10
-local W, H = Factory.W, Factory.H
+Factory.W, Factory.H = 14, 10      -- default board size
+Factory.WARMUP = 150               -- ticks run before the clock starts
+Factory.BUSY = 0.9                 -- share of a shift a machine must work to count as "non-stop"
 
 ---------------------------------------------------------------- systems
 
@@ -60,6 +65,8 @@ local function powerSystem(world, F)
   local s = F.shift
   s.supply, s.demand = supply, demand
   s.factor = (demand > supply) and (supply / demand) or 1
+  s.supplySum = s.supplySum + supply
+  s.demandSum = s.demandSum + math.min(demand, supply)
 end
 
 local function machineSystem(world, F)
@@ -86,8 +93,9 @@ end
 
 ---------------------------------------------------------------- factory
 
-function Factory.new()
+function Factory.new(w, h)
   local F = setmetatable({}, Factory)
+  F.W, F.H = w or Factory.W, h or Factory.H
   F.world = ECS.world()
   F.grid = {}
   F.slots = {}
@@ -95,24 +103,23 @@ function Factory.new()
   F.ovenBelts = {}
   F.recipes = {}
   F.rules = Rules.new({})
-  F.unplaced = 0
-  local w = F.world
-  w:addSystem('tick', cleanupSystem)
-  w:addSystem('tick', portSystem)
-  w:addSystem('tick', powerSystem)
-  w:addSystem('tick', machineSystem)
-  w:addSystem('tick', Transfer.system)
-  w:addSystem('tick', ovenSystem)
+  local world = F.world
+  world:addSystem('tick', cleanupSystem)
+  world:addSystem('tick', portSystem)
+  world:addSystem('tick', powerSystem)
+  world:addSystem('tick', machineSystem)
+  world:addSystem('tick', Transfer.system)
+  world:addSystem('tick', ovenSystem)
   return F
 end
 
 function Factory:inBounds(x, y)
-  return x >= 0 and y >= 0 and x < W and y < H
+  return x >= 0 and y >= 0 and x < self.W and y < self.H
 end
 
 function Factory:at(x, y)
-  if x < 0 or y < 0 or x >= W or y >= H then return nil end
-  return self.grid[y * W + x]
+  if x < 0 or y < 0 or x >= self.W or y >= self.H then return nil end
+  return self.grid[y * self.W + x]
 end
 
 -- Spawn a building entity. The tile must be empty.
@@ -145,7 +152,7 @@ function Factory:place(kind, x, y, dir, extra)
     Machine.reset(e)
   end
   self.world:spawn(e)
-  self.grid[y * W + x] = e
+  self.grid[y * self.W + x] = e
   return e
 end
 
@@ -154,7 +161,7 @@ function Factory:remove(x, y, evenFixed)
   local e = self:at(x, y)
   if not e or (e.building.fixed and not evenFixed) then return nil end
   self.world:despawn(e)
-  self.grid[y * W + x] = nil
+  self.grid[y * self.W + x] = nil
   return e.building.kind, e.building.dir
 end
 
@@ -194,9 +201,20 @@ function Factory:plannedDraw(rules)
   return total
 end
 
+local function newShift(rules, ledger)
+  return {
+    tick = 0, len = rules.shiftLen,
+    revenue = 0, plain = 0, sales = 0, sold = {}, order = {},
+    supply = rules.basePower, demand = 0, factor = 1,
+    supplySum = 0, demandSum = 0,
+    ledger = ledger,
+  }
+end
+
+-- info.warm overrides the number of warm-up ticks (0 = a cold start).
 function Factory:beginShift(rules, info)
   self.rules = rules
-  self.unplaced = info and info.unplaced or 0
+  self.shiftId = (self.shiftId or 0) + 1
   self:clearItems()
 
   self.recipes = {}
@@ -228,6 +246,7 @@ function Factory:beginShift(rules, info)
     if e.export then e.export.cd = 0; e.export.sold = 0; e.export.log = {} end
     if e.machine then
       Machine.reset(e)
+      e.machine.shiftId = self.shiftId
       e.machine.speed = rules:speed(self, e)
       e.machine.draw = rules:draw(self, e, e.machine.def.draw or 0)
       -- Mods that change this machine where it stands count once per machine.
@@ -244,21 +263,45 @@ function Factory:beginShift(rules, info)
     end
   end
 
-  self.shift = {
-    tick = 0, len = rules.shiftLen,
-    revenue = 0, plain = 0, sales = 0, sold = {}, order = {},
-    supply = rules.basePower, demand = 0, factor = 1,
-    ledger = ledger,
-  }
+  self.shift = newShift(rules, ledger)
   self.events = {}
   rules:resetShift()
+
+  local warm = info and info.warm or Factory.WARMUP
+  if warm > 0 then
+    -- Run until the factory is flowing; nothing is sold or counted.
+    self.shift.warming = true
+    for _ = 1, warm do self.world:run('tick', self) end
+    self.shift.warming = nil
+  end
+  self:zeroCounters()
+end
+
+-- Start the clock from zero, with whatever is on the belts left there.
+function Factory:zeroCounters()
+  local s = self.shift
+  s.tick, s.supplySum, s.demandSum = 0, 0, 0
+  local list = self.world:query('building')
+  for i = 1, #list do
+    local e = list[i]
+    if e.slot then e.slot.passed = 0 end
+    if e.bridge then e.bridge.lanes[1].passed = 0; e.bridge.lanes[2].passed = 0 end
+    if e.port then e.port.sent = 0 end
+    if e.export then e.export.sold = 0; e.export.log = {} end
+    if e.machine then
+      local m = e.machine
+      m.made, m.idle, m.busy = 0, 0, 0
+    end
+  end
+  self.events = {}
+  self.rules:resetShift()
 end
 
 -- A mod did something at tile (x, y): book it and tell whoever is watching.
 -- `what` is 'sale' | 'dup' | 'smelt' | 'craft' | 'polish'. A nil mod (a rule
--- field nobody owns) is ignored.
+-- field nobody owns) is ignored, and so is anything during the warm-up.
 function Factory:trigger(mod, x, y, delta, what)
-  if not mod then return end
+  if not mod or self.shift.warming then return end
   local ledger = self.shift.ledger
   local rec = ledger[mod]
   if not rec then
@@ -282,6 +325,7 @@ end
 
 function Factory:sell(itemE, exportE)
   local s = self.shift
+  if s.warming then return end        -- the warm-up sells nothing
   local value, ctx, fired = self.rules:sale(itemE.item, s.tick, s.len)
   s.revenue = s.revenue + value
   s.plain = s.plain + ctx.plain
@@ -304,22 +348,38 @@ function Factory:sell(itemE, exportE)
   end
 end
 
+-- Share of the shift so far that machine entity e spent crafting (0..1), or
+-- nil for a generator, a machine placed since the last shift began, or
+-- before any tick has run. Stays readable after the shift, while rebuilding.
+function Factory:utilisation(e)
+  local m = e.machine
+  local ticks = self.shift and self.shift.tick or 0
+  if not m or m.def.generator or ticks <= 0 or m.shiftId ~= self.shiftId then return nil end
+  return math.min(1, (m.busy or 0) / ticks)
+end
+
 -- Close the shift: apply end-of-shift rules and return the summary.
 function Factory:endShift()
   local s = self.shift
   local perfect, any = true, false
+  local lowest
   local machines = self.world:query('machine')
   for i = 1, #machines do
-    local m = machines[i].machine
-    if not m.def.generator then
+    local e = machines[i]
+    local u = self:utilisation(e)
+    if u then
       any = true
-      if not m.started or m.idle > 0 then perfect = false end
+      if u < Factory.BUSY then perfect = false end
+      if not lowest or u < lowest.u then lowest = { u = u, kind = e.building.kind } end
     end
   end
+  local ticks = math.max(1, s.tick)
+  local supply, demand = s.supplySum / ticks, s.demandSum / ticks
   local sc = {
     revenue = s.revenue, mult = 1, notes = {},
     sold = s.sold, kinds = #s.order,
-    perfect = any and perfect, unplaced = self.unplaced,
+    perfect = any and perfect,
+    spare = math.max(0, supply - demand),
   }
   local results = self.rules:shiftEnd(sc)
   local total = math.floor(s.revenue * sc.mult + 0.5)
@@ -342,6 +402,7 @@ function Factory:endShift()
     base = s.revenue, mult = sc.mult, notes = sc.notes, total = total,
     sold = s.sold, order = s.order, perfect = sc.perfect,
     plain = s.plain, ledger = s.ledger, results = results,
+    ticks = s.tick, supply = supply, demand = demand, lowest = lowest,
   }
 end
 

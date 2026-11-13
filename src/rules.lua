@@ -25,13 +25,14 @@ local function isScalar(v)
   return t ~= 'table' and t ~= 'function'
 end
 
-function Rules.new(mods)
+-- base: the run's own numbers, before any mod touches them ({ basePower }).
+function Rules.new(mods, base)
   local r = setmetatable({
     mods = mods or {}, state = {}, extra = {}, owner = {}, recipeOwner = {},
   }, Rules)
   r.shiftLen = Contracts.shiftLen
   r.shifts = Contracts.shifts
-  r.basePower = Contracts.basePower
+  r.basePower = base and base.basePower or Contracts.basePower
   r.maxPolish = 1
   r.exportPeriod = 1
   r.leakEvery = nil

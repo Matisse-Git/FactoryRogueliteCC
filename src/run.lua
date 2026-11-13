@@ -1,4 +1,4 @@
--- One run: the factory, the kit, upgrades, credits and contract progress.
+-- One run: the factory, blueprints, upgrades, credits and contract progress.
 
 local Factory = require 'src.sim.factory'
 local Rules = require 'src.rules'
@@ -16,8 +16,10 @@ function Run.new(seed)
   r.layoutRng = Rng.new(seed * 7 + 1)
   r.shopRng = Rng.new(seed * 13 + 5)
   r.credits = Contracts.startCredits
-  r.kit = {}
-  for k, n in pairs(Contracts.startKit) do r.kit[k] = n end
+  r.blueprints = {}          -- machine kinds unlocked for the run
+  for _, kind in ipairs(Contracts.startBlueprints) do r.blueprints[kind] = true end
+  r.power = Contracts.basePower
+  r.powerBought = 0
   r.upgrades = {}            -- upgrade ids, in slot order
   r.index = 1                -- current contract
   r.progress = 0             -- revenue banked on the current contract
@@ -58,7 +60,7 @@ function Run:refreshRules()
   for _, id in ipairs(self.upgrades) do mods[#mods + 1] = Upgrades.byId[id] end
   local c = self:contract()
   if c.boss then mods[#mods + 1] = c.boss end
-  self.rules = Rules.new(mods)
+  self.rules = Rules.new(mods, { basePower = self.power })
   return self.rules
 end
 
@@ -123,7 +125,7 @@ function Run:placeRubble(n)
     local x, y = rng:int(1, Factory.W - 2), rng:int(0, Factory.H - 1)
     local e = F:at(x, y)
     if not e or not e.building.fixed then
-      if e then F:remove(x, y) end     -- the piece goes back to the kit
+      if e then F:remove(x, y) end
       F:place('rubble', x, y, 0)
       placed = placed + 1
     end
@@ -140,21 +142,21 @@ function Run:startContract()
   self:refreshRules()
 end
 
----------------------------------------------------------------- kit
+---------------------------------------------------------------- blueprints
 
--- Pieces of `kind` still in the box. Belts are unlimited.
-function Run:available(kind)
-  if Machines[kind].free then return math.huge end
-  local placed = self.factory:counts()[kind] or 0
-  return (self.kit[kind] or 0) - placed
+-- Can this kind be built? Logistics are free; machines need their blueprint.
+function Run:unlocked(kind)
+  local def = Machines[kind]
+  return def ~= nil and not def.fixed and (def.free or self.blueprints[kind]) and true or false
 end
 
-function Run:unplaced()
-  local counts, n = self.factory:counts(), 0
-  for kind, owned in pairs(self.kit) do
-    n = n + math.max(0, owned - (counts[kind] or 0))
+-- The kinds the player can build, in palette order.
+function Run:palette()
+  local list = {}
+  for _, kind in ipairs(Machines.list) do
+    if self:unlocked(kind) then list[#list + 1] = kind end
   end
-  return n
+  return list
 end
 
 ---------------------------------------------------------------- shifts
@@ -165,7 +167,7 @@ end
 
 function Run:beginShift()
   self.shiftsUsed = self.shiftsUsed + 1
-  self.factory:beginShift(self:refreshRules(), { unplaced = self:unplaced() })
+  self.factory:beginShift(self:refreshRules())
 end
 
 -- Returns the shift summary with .status = 'next' | 'cleared' | 'failed'.
@@ -211,17 +213,21 @@ end
 
 ---------------------------------------------------------------- shop
 
+-- 2 blueprints not owned yet (fewer when they run out) and 2 upgrades.
 function Run:rollShop()
   local rng = self.shopRng
   local offers = {}
   local pool = {}
   for _, kind in ipairs(Machines.list) do
     local def = Machines[kind]
-    if def.cost then pool[#pool + 1] = { kind, def.weight or 1 } end
+    if def.cost and not self.blueprints[kind] then pool[#pool + 1] = { kind, def.weight or 1 } end
   end
-  for _ = 1, 2 do
+  for _ = 1, math.min(2, #pool) do
     local kind = rng:weighted(pool)
-    offers[#offers + 1] = { type = 'machine', id = kind, cost = Machines[kind].cost }
+    for i, entry in ipairs(pool) do
+      if entry[1] == kind then table.remove(pool, i); break end
+    end
+    offers[#offers + 1] = { type = 'blueprint', id = kind, cost = Machines[kind].cost }
   end
   local owned = {}
   for _, id in ipairs(self.upgrades) do owned[id] = true end
@@ -270,8 +276,8 @@ function Run:buy(i)
   local o = self.shop.offers[i]
   self.credits = self.credits - o.cost
   o.sold = true
-  if o.type == 'machine' then
-    self.kit[o.id] = (self.kit[o.id] or 0) + 1
+  if o.type == 'blueprint' then
+    self.blueprints[o.id] = true
   else
     self.upgrades[#self.upgrades + 1] = o.id
   end
@@ -288,21 +294,18 @@ function Run:sellUpgrade(slot)
   return true
 end
 
-function Run:sellMachine(kind)
-  if (self.kit[kind] or 0) <= 0 then return false end
-  -- If every copy is on the board, pull the most recently placed one.
-  if self:available(kind) <= 0 then
-    local list = self.factory.world:query('building')
-    for i = #list, 1, -1 do
-      local e = list[i]
-      if e.building.kind == kind then
-        self.factory:remove(e.pos.x, e.pos.y)
-        break
-      end
-    end
-  end
-  self.kit[kind] = self.kit[kind] - 1
-  self.credits = self.credits + math.floor(Machines[kind].cost / 2)
+-- Power is bought in steps; each one costs a credit more than the last.
+function Run:powerCost()
+  return Contracts.powerCost + self.powerBought
+end
+
+function Run:buyPower()
+  local cost = self:powerCost()
+  if self.credits < cost then return false end
+  self.credits = self.credits - cost
+  self.powerBought = self.powerBought + 1
+  self.power = self.power + Contracts.powerStep
+  self:refreshRules()
   return true
 end
 

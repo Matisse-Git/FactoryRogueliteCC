@@ -203,6 +203,7 @@ function Transfer.system(world, F)
   -- Lift every moving item off its slot ...
   for i = 1, #moves do
     local S = moves[i].S
+    S.passed = (S.passed or 0) + 1
     if S.kind == 'out' then
       local q = S.e.machine.outq
       table.remove(q, 1)

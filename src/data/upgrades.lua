@@ -13,7 +13,9 @@
 --   draw(F, e, watts)   return the watts machine entity e draws
 --
 -- ctx = { type, form, mats, polished, dist, tick, len, value }
--- sc  = { revenue, mult, notes, sold, kinds, perfect, unplaced }
+-- sc  = { revenue, mult, notes, sold, kinds, perfect, spare }
+--       perfect: every machine worked at least 90% of the shift
+--       spare:   watts of supply left unused, on average
 --
 -- An upgrade never says when it "triggers": src/rules.lua sees what each hook
 -- changed and the game shows it (card pop, ledger, board markers). Write the
@@ -68,7 +70,7 @@ local list = {
   },
   {
     id = 'perfect_ratio', name = 'Perfect Ratio', code = 'PR', color = 'purple', cost = 7,
-    desc = 'If every machine ran non-stop after its first craft, shift revenue x2.',
+    desc = 'If every machine worked at least 90% of the shift, shift revenue x2.',
     shiftEnd = function(s, sc)
       if sc.perfect then
         sc.mult = sc.mult * 2
@@ -195,11 +197,12 @@ local list = {
   },
   {
     id = 'minimalist', name = 'Minimalist', code = 'MI', color = 'purple', cost = 6,
-    desc = 'Shift revenue +10% for every machine left unplaced in your kit.',
+    desc = 'Shift revenue +3% for every watt of power left unused, up to +60%.',
     shiftEnd = function(s, sc)
-      if sc.unplaced > 0 then
-        sc.mult = sc.mult * (1 + 0.1 * sc.unplaced)
-        sc.notes[#sc.notes + 1] = { 'Minimalist', '+' .. (sc.unplaced * 10) .. '%' }
+      local pct = math.min(60, math.floor(sc.spare) * 3)
+      if pct > 0 then
+        sc.mult = sc.mult * (1 + pct / 100)
+        sc.notes[#sc.notes + 1] = { 'Minimalist', '+' .. pct .. '%' }
       end
     end,
   },
