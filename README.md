@@ -69,24 +69,29 @@ a smelter takes 4 s, a press 3 s, an assembler 6 s. The recipe book (Tab) has th
 | R / mouse wheel | Rotate the selected piece, or the piece under the cursor |
 | 1–9 | Select a piece from the kit |
 | Q / Esc | Deselect |
+| Esc (nothing selected) / MENU button | Pause menu: resume, settings, abandon run |
 | X | Clear the board |
 | Space / Enter | Run the shift; during a shift, Space pauses |
 | 1 / 2 / 3 (during a shift) | Speed 1×, 2×, 4× |
 | Tab | Recipe book |
-| F10 | Settings (a running shift waits while they are open) |
+| F10 | Settings, from anywhere |
 | F11 | Fullscreen |
 
 ### Settings
 
-- **CRT filter**: one strength slider, 0 to 100 (click, drag, or Left / Right). 50 is the default:
-  scanlines, a soft glow, darker corners, a faint colour fringe near the edges and a slight bulge.
-  0 turns it off. Nothing in the filter moves or flickers. Scanlines fade out when the picture
-  is shown at less than 3×.
+- **CRT filter**: scanlines, a soft glow, darker corners, a faint colour fringe near the edges
+  and a slight bulge. Nothing in it moves or flickers. Scanlines fade out when the picture is
+  shown at less than 3×.
+  - **Simple**: one strength slider for the whole filter, 0 to 100. 50 is the default, 0 turns it off.
+  - **Custom**: one slider per part. The first time, they start from the simple slider; after
+    that the two modes keep their own values.
+  - Sliders take a click, a drag, or Left / Right; Up / Down pick which slider the keys move.
 - **Fullscreen**: same as F11.
 - **Integer scaling**: on, the picture is scaled by whole numbers with black bars around it.
   Off, it fills the window as far as its 16:9 shape allows.
 
-Settings are saved to `settings.txt` in the LÖVE save directory.
+Settings are saved to `settings.txt` in the LÖVE save directory. A running shift waits while
+the pause menu or the settings are open.
 
 ## Where things live
 
@@ -101,9 +106,10 @@ src/data/              ALL content and balance: items, recipes, machines,
                        upgrades, contracts (quotas, bosses, payouts)
 src/gfx/               palette, pixel font, sprites (authored as text);
                        crt.lua is the CRT filter and its mouse correction
-src/ui/                screens: title, game, shop, recipe book; settings.lua
-                       is the settings panel; fx.lua holds the upgrade
-                       feedback (card pops, tile flashes)
+src/ui/                screens: title, game, shop, recipe book; pause.lua and
+                       settings.lua are the pause menu and settings panel;
+                       fx.lua holds the upgrade feedback (card pops, tile
+                       flashes)
 tests/                 headless tests, ASCII layout loader, benchmark
 tools/shots.lua        scripted play-through with screenshots
 ```

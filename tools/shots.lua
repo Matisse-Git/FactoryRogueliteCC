@@ -10,6 +10,7 @@ return function(App)
   local Factory = require 'src.sim.factory'
   local Settings = require 'src.settings'
   local Panel = require 'src.ui.settings'
+  local Pause = require 'src.ui.pause'
   local Crt = require 'src.gfx.crt'
   local out = love.graphics.newCanvas(960, 540)
   out:setFilter('nearest', 'nearest')
@@ -30,7 +31,7 @@ return function(App)
   -- Crt.warp, by iteration.
   local function screenOf(px, py)
     local s, ox, oy = App.layout()
-    local k = Crt.K * App.crt()
+    local k = Crt.K * App.levels().bulge
     local dx, dy = px / App.W * 2 - 1, py / App.H * 2 - 1
     local cx, cy = dx, dy
     for _ = 1, 20 do cx, cy = dx / (1 + k * cy * cy), dy / (1 + k * cx * cx) end
@@ -193,10 +194,8 @@ return function(App)
     expect('a running shift cannot be skipped', App.g.mode == 'run')
     click(300, 170)
     expect('4X button sets the speed', App.g.speed == 4 and App.g.mode == 'run')
-    for _ = 1, 900 do
-      if App.g.mode ~= 'run' then break end
-      wait(1)
-    end
+    local t0 = love.timer.getTime()     -- by the clock: frames may run unthrottled
+    while App.g.mode == 'run' and love.timer.getTime() - t0 < 30 do wait(1) end
     expect('the shift ends on its own', App.g.mode == 'summary')
     App.g.speed = 1
     shot('05_summary')
@@ -214,6 +213,10 @@ return function(App)
     expect('banked revenue clears the contract', App.g.mode == 'summary' and App.g.summary.status == 'cleared')
     click(170, 157)
     expect('COLLECT opens the shop', App.state == 'shop' and App.run.credits > 4)
+    click(159, 10)
+    expect('shop: MENU opens the pause menu', App.overlay == 'pause')
+    App.keypressed('escape')
+    expect('shop: Esc closes it again', App.overlay == nil and App.state == 'shop')
 
     ---------------------------------------------------------- shop
     App.run.credits = 40
@@ -411,7 +414,7 @@ return function(App)
     expect('crt: the filter is available', Crt.ok)
     expect('settings: defaults', Settings.crt == 50 and Settings.integer)
     click(160, 160)
-    expect('settings: the title button opens the panel', App.settingsOpen)
+    expect('settings: the title button opens the panel', App.overlay == 'settings')
     local seed = App.seed
     App.keypressed('3')
     expect('settings: keys do not reach the screen underneath', App.seed == seed)
@@ -432,20 +435,46 @@ return function(App)
     expect('slider: and stops on release', Settings.crt == 30)
     App.keypressed('right')
     expect('slider: arrow keys step by 10', Settings.crt == 40)
+
+    -- One slider per part.
+    click(Panel.at('mode'))
+    expect('custom: the switch shows a slider per part', Settings.custom and Panel.stop(0, 'bulge') ~= nil)
+    expect('custom: the parts start from the one slider',
+      Settings.scanlines == 40 and Settings.glow == 40 and Settings.bulge == 40)
+    click(Panel.stop(100, 'bulge'))
+    expect('custom: a slider moves only its own part',
+      App.levels().bulge == 1 and App.levels().glow == 0.4 and Settings.crt == 40)
+    App.keypressed('up')
+    App.keypressed('left')
+    expect('custom: Up / Down pick the slider the arrows move', Settings.fringe == 30 and Settings.bulge == 100)
+    click(Panel.stop(0, 'scanlines'))
+    App.move(300, 20)
+    wait(2)
+    shot('24_settings_custom')
+    click(Panel.at('mode'))
+    expect('custom: switching back keeps the one slider',
+      not Settings.custom and Settings.crt == 40 and App.levels().bulge == 0.4)
+    click(Panel.at('mode'))
+    expect('custom: and the parts keep their own values',
+      Settings.custom and Settings.bulge == 100 and Settings.scanlines == 0)
+    for _, part in ipairs(Settings.PARTS) do click(Panel.stop(0, part)) end
+    expect('custom: every part at 0 turns the filter off', Crt.off(App.levels()))
+    click(Panel.at('mode'))
+
     for _ = 1, 6 do App.keypressed('left') end
-    expect('slider: 0 turns the filter off', Settings.crt == 0 and App.crt() == 0)
+    expect('slider: 0 turns the filter off', Settings.crt == 0 and Crt.off(App.levels()))
 
     expect('scaling: whole numbers by default', App.layout(1000, 700) == 3)
-    click(219, 104)
+    click(Panel.at('integer'))
     expect('scaling: the switch allows fractional sizes',
       not Settings.integer and App.layout(1000, 700) == 3.125)
     wait(2)
     crtShot('22_fractional_scaling', 1000, 700)
-    click(219, 104)
+    click(Panel.at('integer'))
     expect('scaling: and switches back', Settings.integer and App.layout(1000, 700) == 3)
 
     App.keypressed('escape')
-    expect('settings: Esc closes the panel, not the game', not App.settingsOpen and App.state == 'title')
+    expect('settings: Esc closes the panel, not the game', App.overlay == nil and App.state == 'title')
 
     ---------------------------------------------------------- CRT filter
     App.seed = 4242
@@ -454,6 +483,31 @@ return function(App)
     click(112, 142)
     App.keypressed('x')
     F = App.run.factory
+
+    ---------------------------------------------------------- pause menu
+    App.g.tool = 'belt'
+    App.keypressed('escape')
+    expect('pause: Esc first drops the piece in hand', App.g.tool == nil and App.overlay == nil)
+    App.keypressed('escape')
+    expect('pause: then opens the pause menu', App.overlay == 'pause')
+    App.move(300, 20)
+    wait(2)
+    shot('25_pause')
+    App.keypressed('escape')
+    expect('pause: Esc resumes', App.overlay == nil and App.state == 'game')
+    click(304, 5)
+    expect('pause: the MENU button opens it', App.overlay == 'pause')
+    click(Pause.at('settings'))
+    expect('pause: SETTINGS opens the settings', App.overlay == 'settings')
+    click(Panel.at('close'))
+    expect('pause: closing them returns to the pause menu', App.overlay == 'pause')
+    App.keypressed('f10')
+    App.keypressed('f10')
+    expect('pause: so does F10', App.overlay == 'pause')
+    click(Pause.at('resume'))
+    expect('pause: RESUME returns to the run', App.overlay == nil and App.state == 'game')
+
+    ---------------------------------------------------------- CRT filter
     Settings.set('crt', 100)
     App.g.tool = 'belt'
     -- The inner corner of cell (1, 0): drawn far enough from where an
@@ -477,7 +531,7 @@ return function(App)
     App.g.acc = 30.4
     wait(3)
     App.keypressed('f10')
-    expect('settings: F10 opens the panel during a shift', App.settingsOpen)
+    expect('settings: F10 opens the panel during a shift', App.overlay == 'settings')
     local acc = App.g.acc
     wait(10)
     expect('settings: the shift waits while the panel is open', App.g.acc == acc)
@@ -486,7 +540,12 @@ return function(App)
     crtShot('23_crt_settings_100', 1280, 720)
     App.keypressed('f10')
     wait(3)
-    expect('settings: closing it resumes the shift', not App.settingsOpen and App.g.acc ~= acc)
+    expect('settings: closing it resumes the shift', App.overlay == nil and App.g.acc ~= acc)
+    App.keypressed('escape')
+    acc = App.g.acc
+    wait(10)
+    expect('pause: the shift waits behind the pause menu', App.overlay == 'pause' and App.g.acc == acc)
+    App.keypressed('escape')
 
     App.g.paused = true
     App.move(cellXY(3, F.world:query('port')[1].pos.y))
@@ -495,8 +554,25 @@ return function(App)
     Settings.set('crt', 50)
     wait(2)
     crtShot('20_crt_50', 1280, 720)
+    Settings.setCustom(true)
+    for _, part in ipairs(Settings.PARTS) do Settings[part] = 0 end
+    Settings.scanlines = 100
+    wait(2)
+    crtShot('26_crt_custom_scanlines_only', 1280, 720)
+    Settings.setCustom(false)
     App.g.paused = false
     Game.fastForward(App)
+
+    ---------------------------------------------------------- abandoning
+    App.keypressed('escape')
+    click(Pause.at('abandon'))
+    expect('abandon: one click only asks', App.overlay == 'pause' and App.state == 'game')
+    App.move(300, 20)
+    wait(2)
+    click(Pause.at('abandon'))
+    expect('abandon: moving away takes the question back', App.overlay == 'pause' and App.state == 'game')
+    click(Pause.at('abandon'))
+    expect('abandon: a second click ends the run', App.overlay == nil and App.state == 'title')
 
     print('screenshots saved to ' .. love.filesystem.getSaveDirectory())
   end)

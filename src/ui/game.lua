@@ -522,7 +522,7 @@ local function drawSidebar(app)
   UI.rect(SX, 0, 1, 180, P.line)
 
   UI.text('$' .. run.credits, SX + 4, 3, P.gold)
-  UI.textRight('SEED ' .. run.seed, 317, 3, P.faint)
+  if UI.button('MENU', 291, 1, 27, 9) then app.openPause() end
 
   -- Power.
   local live = g.mode == 'run' or g.mode == 'summary'
@@ -839,15 +839,12 @@ end
 function Game.key(app, key)
   local g = app.g
   if key == 'tab' then g.book = not g.book; return end
-  if g.book then
-    if key == 'escape' then g.book = false end
-    return
-  end
+  if g.book then return end
   if g.mode == 'intro' then
     if key == 'space' or key == 'return' then g.mode = 'build' end
   elseif g.mode == 'build' then
     if key == 'r' then rotate(app, 1)
-    elseif key == 'escape' or key == 'q' then g.tool = nil
+    elseif key == 'q' then g.tool = nil
     elseif key == 'space' or key == 'return' then startShift(app)
     elseif key == 'x' then clearBoard(app)
     else
@@ -867,6 +864,15 @@ function Game.key(app, key)
       if revealDone(g) then afterSummary(app) else completeReveal(g) end
     end
   end
+end
+
+-- Esc: close the recipe book or drop the piece in hand. Returns false when
+-- there was nothing to cancel (the app then opens the pause menu).
+function Game.cancel(app)
+  local g = app.g
+  if g.book then g.book = false; return true end
+  if g.mode == 'build' and g.tool then g.tool = nil; return true end
+  return false
 end
 
 -- Exposed for the screenshot script.

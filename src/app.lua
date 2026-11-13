@@ -1,5 +1,5 @@
 -- App shell: 320x180 canvas put on screen through the CRT filter, screen
--- switching, the settings panel, input.
+-- switching, the pause menu and settings panel on top, input.
 
 local P = require 'src.gfx.palette'
 local Font = require 'src.gfx.font'
@@ -9,14 +9,19 @@ local UI = require 'src.ui.ui'
 local Run = require 'src.run'
 local Settings = require 'src.settings'
 local Panel = require 'src.ui.settings'
+local Pause = require 'src.ui.pause'
 
-local App = { W = 320, H = 180, state = 'title', time = 0, seed = 1, settingsOpen = false }
+-- App.overlay is nil, 'pause' or 'settings': what sits on top of the screen.
+local App = { W = 320, H = 180, state = 'title', time = 0, seed = 1 }
 
 local screens = {
   title = require 'src.ui.title',
   game = require 'src.ui.game',
   shop = require 'src.ui.shop',
 }
+
+local overlays = { pause = Pause, settings = Panel }
+local NO_FILTER = { scanlines = 0, glow = 0, vignette = 0, fringe = 0, bulge = 0 }
 
 local function randomSeed()
   return os.time() % 90000 + 10000
@@ -51,9 +56,10 @@ function App.toTitle()
   App.seed = randomSeed()
 end
 
--- CRT strength as 0..1; 0 when the filter could not be built.
-function App.crt()
-  return Crt.ok and Settings.crt / 100 or 0
+-- Strength of each part of the CRT filter, 0..1; all 0 when the filter
+-- could not be built.
+function App.levels()
+  return Crt.ok and Settings.levels() or NO_FILTER
 end
 
 -- The largest picture that fits a w x h area (the window by default),
@@ -69,7 +75,7 @@ end
 -- Window position to canvas pixel, through the same bulge the filter draws.
 function App.toCanvas(x, y)
   local s, ox, oy = App.layout()
-  local u, v = Crt.warp((x + 0.5 - ox) / (App.W * s), (y + 0.5 - oy) / (App.H * s), App.crt())
+  local u, v = Crt.warp((x + 0.5 - ox) / (App.W * s), (y + 0.5 - oy) / (App.H * s), App.levels())
   return math.floor(u * App.W), math.floor(v * App.H)
 end
 
@@ -78,25 +84,52 @@ function App.setFullscreen(on)
   Settings.set('fullscreen', on)
 end
 
--- The settings panel sits on top of the current screen, which stops
--- updating (so a running shift waits) and stops receiving input.
-function App.openSettings()
-  if App.settingsOpen then return end
-  local scr = screens[App.state]
-  if scr.release then scr.release(App, UI.mx, UI.my, 1) end   -- end any drag
+-- An overlay sits on top of the current screen, which stops updating (so a
+-- running shift waits) and stops receiving input.
+local function show(name)
+  if not App.overlay then
+    local scr = screens[App.state]
+    if scr.release then scr.release(App, UI.mx, UI.my, 1) end   -- end any drag
+  end
   UI.click = nil
-  App.settingsOpen = true
+  App.overlay = name
+end
+
+-- Settings open from anywhere (F10), and close back to where they came
+-- from: the pause menu or the screen.
+function App.openSettings()
+  if App.overlay == 'settings' then return end
+  App.settingsFrom = App.overlay
+  show('settings')
 end
 
 function App.closeSettings()
   Panel.release()
-  App.settingsOpen = false
+  if App.settingsFrom == 'pause' then Pause.open() end
+  show(App.settingsFrom)
+  App.settingsFrom = nil
+end
+
+-- The pause menu exists only during a run.
+function App.openPause()
+  if App.overlay or App.state == 'title' then return end
+  Pause.open()
+  show('pause')
+end
+
+function App.closePause()
+  show(nil)
+end
+
+function App.abandonRun()
+  show(nil)
+  App.toTitle()
 end
 
 function App.update(dt)
   dt = math.min(dt, 0.1)
   App.time = App.time + dt
-  if App.settingsOpen then return end
+  if App.overlay then return end
   local scr = screens[App.state]
   if scr.update then scr.update(App, dt) end
 end
@@ -104,10 +137,10 @@ end
 -- Put the canvas on the current render target, sized for a w x h area.
 function App.present(w, h)
   local s, ox, oy = App.layout(w, h)
-  local t = App.crt()
+  local levels = App.levels()
   love.graphics.setColor(1, 1, 1, 1)
-  if Crt.ok and (t > 0 or s ~= math.floor(s)) then
-    Crt.draw(App.canvas, ox, oy, s, t)
+  if Crt.ok and (s ~= math.floor(s) or not Crt.off(levels)) then
+    Crt.draw(App.canvas, ox, oy, s, levels)
   else
     love.graphics.draw(App.canvas, ox, oy, 0, s, s)
   end
@@ -117,13 +150,14 @@ function App.draw()
   love.graphics.setCanvas(App.canvas)
   love.graphics.clear(P.bg[1], P.bg[2], P.bg[3], 1)
   UI.beginFrame()
-  if App.settingsOpen then
+  local over = overlays[App.overlay]
+  if over then
     -- The screen underneath is drawn with no mouse and no click.
     local mx, my, click = UI.mx, UI.my, UI.click
     UI.mx, UI.my, UI.click = -1, -1, nil
     screens[App.state].draw(App)
     UI.mx, UI.my, UI.click, UI.tip = mx, my, click, nil
-    Panel.draw(App)
+    over.draw(App)
   else
     screens[App.state].draw(App)
   end
@@ -136,9 +170,9 @@ function App.draw()
   if App.script then App.script() end
 end
 
--- Whatever takes input right now: the settings panel or the screen.
+-- Whatever takes input right now: the overlay or the screen.
 local function target()
-  return App.settingsOpen and Panel or screens[App.state]
+  return overlays[App.overlay] or screens[App.state]
 end
 
 -- Canvas-space input (also used by the screenshot script).
@@ -185,7 +219,14 @@ function App.keypressed(key)
     return
   end
   if key == 'f10' then
-    if App.settingsOpen then App.closeSettings() else App.openSettings() end
+    if App.overlay == 'settings' then App.closeSettings() else App.openSettings() end
+    return
+  end
+  -- In a run, Esc first cancels whatever the screen has open or in hand;
+  -- with nothing to cancel it opens the pause menu.
+  if key == 'escape' and not App.overlay and App.state ~= 'title' then
+    local scr = screens[App.state]
+    if not (scr.cancel and scr.cancel(App)) then App.openPause() end
     return
   end
   local t = target()

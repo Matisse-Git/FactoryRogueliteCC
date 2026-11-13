@@ -24,6 +24,7 @@ function Shop.draw(app)
   UI.rect(0, 0, 320, 180, P.bg)
   UI.text('SHOP', 8, 6, P.text, 2)
   UI.textRight('$' .. run.credits, 312, 6, P.gold, 2)
+  if UI.button('MENU', 146, 6, 27, 9) then app.openPause() end
   local p = run.lastPayout
   if p then
     UI.text('PAYOUT  CONTRACT +$' .. p.base .. '   UNUSED SHIFTS +$' .. p.unused ..
