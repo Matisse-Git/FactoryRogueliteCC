@@ -159,7 +159,10 @@ Version 1.0 is being built on the `v1-overhaul` branch, one milestone at a time.
 Done so far: blueprints, power as the budget, warm-start shifts, rates and
 utilisation on screen; one persistent site of 4x3 plots around a central depot,
 new land every contract, a camera with two zoom levels (wheel or Z, WASD or
-middle-drag to move), and select / copy / cut / paste (V, then C, X, Delete).
+middle-drag to move), and select / copy / cut / paste (V, then C, X, Delete);
+ten production machines, 37 items in five tiers where every step is worth about
+2.7x what went in, a filter (F sets its item), a tar byproduct that generators
+burn, and crates.
 Quotas are not yet retuned for any of it, and the rest of this file still
 describes the single-board prototype in places. No audio, no saved runs. Art is
 placeholder.

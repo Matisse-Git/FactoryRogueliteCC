@@ -149,6 +149,9 @@ function Factory:place(kind, x, y, dir, extra)
   elseif kind == 'splitter' then
     e.splitter = { ptr = 1, count = 0 }
     e.slot = Transfer.newSlot(e, 'split')
+  elseif kind == 'filter' then
+    e.filter = { item = extra.item, ptr = 1 }     -- item: the type that goes straight on
+    e.slot = Transfer.newSlot(e, 'filter')
   elseif kind == 'port' then
     e.port = { item = extra.item, period = extra.period or 2, cd = 0, sent = 0 }
     e.slot = Transfer.newSlot(e, 'port')
@@ -257,6 +260,7 @@ function Factory:beginShift(rules, info)
       end
     end
     if e.splitter then e.splitter.ptr = 1; e.splitter.count = 0 end
+    if e.filter then e.filter.ptr = 1 end
     if e.port then e.port.cd = 0; e.port.sent = 0 end
     if e.export then e.export.cd = 0; e.export.sold = 0; e.export.log = {} end
     if e.machine then
@@ -358,11 +362,11 @@ function Factory:sell(itemE, exportE, d)
     s.sold[ctx.type] = rec
     s.order[#s.order + 1] = ctx.type
   end
-  rec.n = rec.n + 1
+  rec.n = rec.n + ctx.units           -- a crate counts as the items in it
   rec.total = rec.total + value
   local ex = exportE.export
-  ex.sold = ex.sold + 1
-  ex.log[ctx.type] = (ex.log[ctx.type] or 0) + 1
+  ex.sold = ex.sold + ctx.units
+  ex.log[ctx.type] = (ex.log[ctx.type] or 0) + ctx.units
   local x, y = exportE.pos.x, exportE.pos.y
   self.events[#self.events + 1] = { kind = 'sale', x = x, y = y, value = value, fired = fired }
   if fired then

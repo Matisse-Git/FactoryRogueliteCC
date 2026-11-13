@@ -1,8 +1,12 @@
 -- Transfer system: moves every item one step per tick, all at once.
 --
 -- A "slot" holds at most one item: a belt tile, one lane of a bridge, a
--- splitter, a port's mouth or a machine's output. Machines and exports are
--- "buffers": they accept by capacity and never chain within a tick.
+-- splitter, a filter, a port's mouth or a machine's output. Machines and
+-- exports are "buffers": they accept by capacity and never chain within a tick.
+--
+-- Splitters and filters are "routers": one way in (the back), several ways
+-- out. A splitter takes its three outputs in turn. A filter sends its chosen
+-- item straight on and everything else out of its two sides, in turn.
 --
 -- Resolution is a memoised depth-first search:
 --   leaves(S)  - does the item in slot S move this tick?
@@ -30,7 +34,7 @@ local function target(F, x, y, d)
   if t.belt then
     if d == (b.dir + 2) % 4 then return nil, nil end   -- head-on into its front
     return t.slot, nil
-  elseif t.splitter then
+  elseif t.splitter or t.filter then
     if d ~= b.dir then return nil, nil end             -- back entrance only
     return t.slot, nil
   elseif t.bridge then
@@ -57,6 +61,11 @@ local function sourceSlot(se, d)
     if lane.item and lane.dir == d then return lane end
   elseif se.splitter then
     if d ~= (b.dir + 2) % 4 then return se.slot end
+  elseif se.filter then
+    local it = se.slot.item
+    if not it then return nil end
+    local straight = it.item.type == se.filter.item
+    if straight == (d == b.dir) and d ~= (b.dir + 2) % 4 then return se.slot end
   end
   return nil
 end
@@ -66,10 +75,21 @@ local function candidates(S)
   local e = S.e
   if S.kind == 'lane' then return { S.dir } end
   local dir = e.building.dir
-  if S.kind ~= 'split' then return { dir } end
-  local all = { dir, (dir + 3) % 4, (dir + 1) % 4 }
-  local p = e.splitter.ptr
-  return { all[p], all[p % 3 + 1], all[(p + 1) % 3 + 1] }
+  if S.kind == 'split' then
+    local all = { dir, (dir + 3) % 4, (dir + 1) % 4 }
+    local p = e.splitter.ptr
+    return { all[p], all[p % 3 + 1], all[(p + 1) % 3 + 1] }
+  elseif S.kind == 'filter' then
+    if S.item and S.item.item.type == e.filter.item then return { dir } end
+    local left, right = (dir + 3) % 4, (dir + 1) % 4
+    if e.filter.ptr == 1 then return { left, right } end
+    return { right, left }
+  end
+  return { dir }
+end
+
+local function isRouter(S)
+  return S.kind == 'split' or S.kind == 'filter'
 end
 
 local function reserve(F, t, itemE)
@@ -89,11 +109,11 @@ local leaves, winner
 local function wants(F, S, T, d)
   if not S.item then return false end
   if S.res ~= nil then return S.res and S.moveSlot == T end
-  if S.kind ~= 'split' then return true end
+  if not isRouter(S) then return true end
   -- Mid-resolution: its earlier outputs already failed, so it wants exactly
   -- the output it is asking about right now.
   if S.vis then return S.trying == d end
-  -- A splitter prefers its earlier outputs; T only gets the item if those fail.
+  -- A router prefers its earlier outputs; T only gets the item if those fail.
   local e = S.e
   local cands = candidates(S)
   for i = 1, #cands do
@@ -227,6 +247,12 @@ function Transfer.system(world, F)
       local d = moves[i].d
       local idx = (d == dir) and 1 or (d == (dir + 3) % 4) and 2 or 3
       S.e.splitter.ptr = idx % 3 + 1
+    elseif S.kind == 'filter' then
+      -- The two sides take turns.
+      local dir = S.e.building.dir
+      local d = moves[i].d
+      if d == (dir + 3) % 4 then S.e.filter.ptr = 2
+      elseif d == (dir + 1) % 4 then S.e.filter.ptr = 1 end
     elseif S.kind == 'port' then
       S.e.port.sent = S.e.port.sent + 1
     end

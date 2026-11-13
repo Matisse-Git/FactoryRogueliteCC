@@ -52,7 +52,7 @@ local MOTORS = {
   '.. .. .. .. .. .. .. .. .. .. .. .. .. ..',
   'I> s> p> b> bv .. .. .. .. .. .. .. .. ..',
   '.. .. .. .. a> b> b> b> b> b> b> b> bv ..',
-  'C> s> p> b> b^ .. .. .. .. .. .. .. b> E<',
+  'C> s> w> b> b^ .. .. .. .. .. .. .. b> E<',
 }
 
 -- Same, with the assembler parked next to the export to cut travel time.
@@ -60,7 +60,7 @@ local MOTORS_SHORT = {
   '.. .. .. .. .. .. .. .. .. .. .. .. .. ..',
   'I> s> p> b> b> b> b> b> b> b> b> b> bv ..',
   '.. .. .. .. .. .. .. .. .. .. .. .. a> E<',
-  'C> s> p> b> b> b> b> b> b> b> b> b> b^ ..',
+  'C> s> w> b> b> b> b> b> b> b> b> b> b^ ..',
 }
 
 return function()

@@ -21,6 +21,13 @@ local raw = {
   coal = '3f3f52', coalL = '6a6a84', coalD = '1d1d2a',
   steel = '6f8fb8', steelL = 'a8c4e8', steelD = '3e5578',
   gem = '8ef0f0', gemL = 'e6ffff', gemD = '3a9aa8',
+  quartz = 'e8c8e0', quartzL = 'fff0fa', quartzD = '9a7890',
+  glass = '9fd8ee', glassL = 'e0f6ff', glassD = '4f8fa8',
+  oil = '3a5a50', oilL = '5e8a7c', oilD = '1c2e28',
+  plastic = 'e868b0', plasticL = 'ffb0dc', plasticD = '8e2e68',
+  tar = '3a2c44', tarL = '5a4868', tarD = '181020',
+  silicon = '5a6a9a', siliconL = '8ea0d0', siliconD = '2e3a60',
+  electrum = 'd8e078', electrumL = 'f6ffb8', electrumD = '8a9238',
 
   green = '6bd968', greenD = '2c6e3a',
   red = 'e0524a', redD = '742a2e',

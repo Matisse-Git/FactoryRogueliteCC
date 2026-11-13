@@ -95,13 +95,16 @@ end
 -- info.premium: the price multiplier of the depot face it came in through.
 function Rules:sale(it, tick, len, info)
   local def = Items[it.type]
+  -- A crate sells as its `units` items at once, for a little more.
+  local units = it.pack or 1
+  local scale = 2 ^ it.polished * units * (it.pack and Items.CRATE_BONUS or 1)
   local ctx = {
     type = it.type, polished = it.polished, dist = it.dist,
-    tick = tick, len = len, mats = {},
+    tick = tick, len = len, mats = {}, units = units,
     premium = info and info.premium or nil,
   }
   for _, m in ipairs(def.mats) do ctx.mats[m] = true end
-  ctx.plain = def.value * 2 ^ ctx.polished
+  ctx.plain = def.value * scale
 
   local mods, s = self.mods, self.state
   local fired
@@ -111,13 +114,13 @@ function Rules:sale(it, tick, len, info)
       local type0, mats0 = ctx.type, countKeys(ctx.mats)
       m.sellAs(s, ctx)
       if ctx.type ~= type0 or countKeys(ctx.mats) ~= mats0 then
-        fired = credit(fired, m, (Items[ctx.type].value - Items[type0].value) * 2 ^ ctx.polished)
+        fired = credit(fired, m, (Items[ctx.type].value - Items[type0].value) * scale)
       end
     end
   end
   local sold = Items[ctx.type]
-  ctx.form = sold.form
-  ctx.value = sold.value * 2 ^ ctx.polished
+  ctx.form, ctx.tier = sold.form, sold.tier
+  ctx.value = sold.value * scale
   for i = 1, #mods do
     local m = mods[i]
     if m.value then

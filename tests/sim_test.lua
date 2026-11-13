@@ -209,11 +209,11 @@ return function()
       return F
     end
     local s = runShift(straight(), rules('fools_gold'))
-    check("Fool's Gold: iron ore sells as gold ore", s.total == 60 and s.sold.gold_ore ~= nil, soldString(s))
+    check("Fool's Gold: iron ore sells as gold ore", s.total == 90 and s.sold.gold_ore ~= nil, soldString(s))
     s = runShift(straight(), rules('scrap_dealer'))
     check('Scrap Dealer: ore sells as ingot', s.total == 90, soldString(s))
     s = runShift(straight(), rules('fools_gold', 'scrap_dealer'))
-    check('both: iron ore sells as gold ingot', s.total == 30 * 8, soldString(s))
+    check('both: iron ore sells as gold ingot', s.total == 30 * 9, soldString(s))
     s = runShift(straight(), rules('monopoly'))
     check('Monopoly doubles a single-type shift', s.total == 60 and s.mult == 2, soldString(s))
     s = runShift(straight(), rules('scenic_route'))
@@ -261,9 +261,9 @@ return function()
     s = runShift(layout({
       'I> s> p> b> bv ..',
       '.. .. .. .. a> E<',
-      'C> s> p> b> b^ ..',
+      'C> s> w> b> b^ ..',
     }))
-    check('assembler builds motors from gear + wire', count(s, 'motor') >= 6 and s.total == count(s, 'motor') * 20, soldString(s))
+    check('assembler builds 10 motors a minute from gear + wire', count(s, 'motor') == 10 and s.total == 320, soldString(s))
 
     s = runShift(layout({ 'K> p> E<' }), rules('pressure'))
     check('Pressure: press makes diamonds from coal', count(s, 'diamond') >= 15, soldString(s))
@@ -290,7 +290,7 @@ return function()
     check('16W cannot run 21W of machines flat out (45 gears)', count(s, 'gear') == 45, soldString(s))
     s = runShift(ratio, Rules.new({ Upgrades.byId.perfect_ratio }, { basePower = 21 }))
     check('Perfect Ratio: 4 smelters to 3 presses run flat out (60 gears, x2)',
-      count(s, 'gear') == 60 and s.mult == 2 and s.total == 840,
+      count(s, 'gear') == 60 and s.mult == 2 and s.total == 960,
       soldString(s) .. ', lowest ' .. s.lowest.kind .. ' ' .. math.floor(s.lowest.u * 100) .. '%')
 
     local full = layout({ 'I> b> b> E<' })
@@ -417,6 +417,119 @@ return function()
     check('the premium rule joins the rules', run.rules.mods[1] == Contracts.premium)
   end
 
+  -- 10g. The roster: every machine shape, the filter, the byproduct, crates.
+  do
+    local layout = require 'tests.layout'
+    local Items = require 'src.data.items'
+    local Recipes = require 'src.data.recipes'
+    local Machines = require 'src.data.machines'
+    local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
+    local power = { basePower = 200 }
+
+    local s = runShift(layout({ 'C> s> w> E<' }))
+    check('wire mill: 1 ingot to 2 wires (15 ingots -> 30 wires)', count(s, 'wire') == 30 and s.total == 120, soldString(s))
+
+    s = runShift(layout({ 'Q> c> b> E<' }))
+    check('crusher: quartz to 2 sand each', count(s, 'sand') == 60, soldString(s))
+    s = runShift(layout({ 'Q> s> p> E<' }))
+    check('quartz smelts to glass, glass presses to lenses', count(s, 'lens') == 15 and s.total == 120, soldString(s))
+
+    s = runShift(layout({
+      'I> s> bv ..',
+      '.. .. f> E<',
+      'K> b> b^ ..',
+    }))
+    check('foundry: iron ingot + coal to steel (12 a minute)', count(s, 'steel') == 12 and s.total == 132, soldString(s))
+
+    -- The refinery puts out plastic and tar on one belt; a filter parts them.
+    local F = layout({
+      '.. .. .. E. ..',
+      'O> r> b> t> E<',
+      '.. .. .. .. ..',
+    })
+    F:at(3, 1).filter.item = 'plastic'
+    s = runShift(F)
+    check('refinery: crude to plastic and tar; the filter sends plastic straight on',
+      count(s, 'plastic') == 15 and count(s, 'tar') == 15
+      and F:at(4, 1).export.log.plastic == 15 and not F:at(4, 1).export.log.tar
+      and F:at(3, 0).export.log.tar == 15, soldString(s))
+    F = layout({ 'O> r> b> t> E<' })
+    F:at(3, 0).filter.item = 'plastic'
+    s = runShift(F)
+    check('tar with nowhere to go stops the refinery', count(s, 'plastic') == 0 and s.lowest.u == 0, soldString(s))
+    F = layout({ 'O> r> b> t> E<' })
+    s = runShift(F)
+    check('a filter with no item set lets nothing straight through', s.total == 0, soldString(s))
+
+    F = layout({
+      '.. .. .. g. ..',
+      'O> r> b> t> E<',
+      '.. .. .. .. ..',
+    })
+    F:at(3, 1).filter.item = 'plastic'
+    s = runShift(F, Rules.new({}, { basePower = 6 }))
+    local gen = F:at(3, 0)
+    check('a generator burns the tar (+10W while it does)', gen.machine.made >= 14 and s.supply > 6 and count(s, 'plastic') == 15,
+      gen.machine.made .. ' burned, supply ' .. s.supply)
+
+    -- Two ports on one belt, sorted again by a filter.
+    F = layout({
+      'I> bv .. E. ..',
+      '.. b> b> t> E<',
+      'C> b^ .. E. ..',
+    })
+    F:at(3, 1).filter.item = 'iron_ore'
+    s = runShift(F)
+    local straight, up, down = F:at(4, 1).export.log, F:at(3, 0).export.log, F:at(3, 2).export.log
+    check('filter: its item straight on, the rest out of both sides in turn',
+      straight.iron_ore == 30 and not straight.copper_ore
+      and (up.copper_ore or 0) == 15 and (down.copper_ore or 0) == 15 and not up.iron_ore,
+      soldString(s))
+
+    -- Three inputs to one product.
+    F = Factory.new()
+    F:place('port', 0, 1, 0, { item = 'motor' })
+    F:place('port', 1, 0, 1, { item = 'beam' })
+    F:place('port', 1, 2, 3, { item = 'cable' })
+    F:place('manufacturer', 1, 1, 0)
+    F:place('export', 2, 1, 2)
+    s = runShift(F, Rules.new({}, power))
+    check('manufacturer: motor + beam + cable to 6 engines a minute', count(s, 'engine') == 6 and s.total == 6 * 232, soldString(s))
+
+    -- Crates.
+    s = runShift(layout({ 'I> s> k> E<' }))
+    check('packer: 4 ingots to a crate, sold as 4 items for 10% more (3 crates, $13 each)',
+      count(s, 'iron_ingot') == 12 and s.total == 39, soldString(s))
+    s = runShift(layout({ 'I> s> k> p> E<' }))
+    check('nothing opens a crate', s.total == 0, soldString(s))
+    s = runShift(layout({ 'I> s> o> k> E<' }), Rules.new({}, power))
+    local packed = count(s, 'iron_ingot')
+    check('polish first, then pack: crates of polished ingots at $26', packed >= 12 and packed % 4 == 0 and s.total == packed / 4 * 26, soldString(s))
+
+    -- Depth pays: every recipe is worth 2x to 3.5x what goes in.
+    local worst, best = math.huge, 0
+    for _, kind in ipairs(Machines.list) do
+      if kind ~= 'crusher' then
+        for _, r in ipairs(Recipes[kind] or {}) do
+          local vin, vout = 0, 0
+          for _, i in ipairs(r.inputs) do vin = vin + Items[i[1]].value * i[2] end
+          for _, o in ipairs(r.outputs) do vout = vout + Items[o[1]].value * o[2] end
+          if Items[r.inputs[1][1]].form ~= 'dust' then
+            worst, best = math.min(worst, vout / vin), math.max(best, vout / vin)
+          end
+        end
+      end
+    end
+    check('every recipe multiplies value by 2x to 3.5x', worst >= 2 and best <= 3.5,
+      string.format('%.2f .. %.2f', worst, best))
+    local n = 0
+    for _, id in ipairs(Items.list) do
+      n = n + 1
+      if not Items[id] then n = -1000 end
+    end
+    check('37 items in 5 tiers', n == 37 and Items.computer.tier == 5 and Items.iron_ore.tier == 1, n)
+  end
+
   -- 10f. Booster pads and premium faces in the simulation.
   do
     local layout = require 'tests.layout'
@@ -528,7 +641,7 @@ return function()
     check('Gold Standard stays quiet with no gold sold', #log == 0, #log)
 
     s, log = watchShift(straight(), rules('fools_gold'))
-    check("Fool's Gold is credited the difference in type", near(s.ledger[U.fools_gold].delta, 30) and #log == 30, s.ledger[U.fools_gold].delta)
+    check("Fool's Gold is credited the difference in type", near(s.ledger[U.fools_gold].delta, 60) and #log == 30, s.ledger[U.fools_gold].delta)
 
     -- Harmful triggers have a negative delta.
     s, log = watchShift(straight('copper_ore'), rules('embargo'))
@@ -545,10 +658,10 @@ return function()
 
     -- Credit is marginal, in slot order.
     s = watchShift(straight(), rules('fools_gold', 'scrap_dealer'))
-    check("slot order: Fool's Gold first", near(s.ledger[U.fools_gold].delta, 30) and near(s.ledger[U.scrap_dealer].delta, 180) and s.total == 240,
+    check("slot order: Fool's Gold first", near(s.ledger[U.fools_gold].delta, 60) and near(s.ledger[U.scrap_dealer].delta, 180) and s.total == 270,
       s.ledger[U.fools_gold].delta .. ' / ' .. s.ledger[U.scrap_dealer].delta)
     s = watchShift(straight(), rules('scrap_dealer', 'fools_gold'))
-    check('slot order: Scrap Dealer first', near(s.ledger[U.scrap_dealer].delta, 60) and near(s.ledger[U.fools_gold].delta, 150) and s.total == 240,
+    check('slot order: Scrap Dealer first', near(s.ledger[U.scrap_dealer].delta, 60) and near(s.ledger[U.fools_gold].delta, 180) and s.total == 270,
       s.ledger[U.scrap_dealer].delta .. ' / ' .. s.ledger[U.fools_gold].delta)
 
     -- The ledger always adds up, fractions and multipliers included.

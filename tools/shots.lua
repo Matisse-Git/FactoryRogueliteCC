@@ -167,8 +167,8 @@ return function(App)
     expect('belt drag: turns the corner south',
       f:at(ox + 5, oy + 1) and f:at(ox + 5, oy + 1).building.dir == 1 and f:at(ox + 5, oy + 3) ~= nil)
 
-    App.keypressed('2')
-    expect('keys: 2 selects the smelter', App.g.tool == 'smelter')
+    App.keypressed('6')
+    expect('keys: 6 selects the smelter', App.g.tool == 'smelter')
     local before = App.g.dir
     App.keypressed('r')
     expect('keys: R rotates the tool', App.g.dir == (before + 1) % 4)
@@ -240,6 +240,29 @@ return function(App)
     App.keypressed('delete')
     expect('select: Delete removes the pieces', #f.world:query('machine') == 0 and App.g.sel == nil)
     App.keypressed('q')
+
+    ---------------------------------------------------------- filter
+    click(Game.paletteXY(App, 'filter'))
+    click(cell(ox + 1, oy + 4))
+    local filter = f:at(ox + 1, oy + 4)
+    expect('filter: placing one opens the item chooser', filter and filter.filter and App.g.picker ~= nil)
+    App.move(128 - 74 + 4 + 3 * 14 + 7, 16 + (144 - 90) / 2 + 13 + 7)
+    wait(2)
+    shot('03e_filter_items')
+    click(128 - 74 + 4 + 3 * 14 + 7, 16 + (144 - 90) / 2 + 13 + 7)      -- the 4th item: quartz
+    expect('filter: a click sets the item', filter.filter.item == 'quartz' and App.g.picker == nil)
+    click(cell(ox + 2, oy + 4))
+    expect('filter: the next one keeps that item', f:at(ox + 2, oy + 4).filter.item == 'quartz' and App.g.picker == nil)
+    App.keypressed('q')
+    App.move(cell(ox + 1, oy + 4))
+    App.keypressed('f')
+    expect('filter: F reopens the chooser', App.g.picker ~= nil and App.g.picker.e == filter)
+    App.keypressed('escape')
+    expect('filter: Esc closes it', App.g.picker == nil and App.overlay == nil)
+    wait(2)
+    shot('03f_filter_set')
+    rclick(ox + 1, oy + 4)
+    rclick(ox + 2, oy + 4)
 
     ---------------------------------------------------------- camera
     App.move(cell(ox + 2, oy + 2))
@@ -404,10 +427,19 @@ return function(App)
     shot('08_boss_intro')
 
     App.g.mode = 'build'
-    App.g.book = true
+    App.keypressed('tab')
     wait(2)
     shot('09_book')
-    App.g.book = false
+    for page = 2, 4 do
+      App.keypressed('right')
+      wait(2)
+      shot('09_book_' .. page)
+    end
+    expect('book: arrows turn the pages', App.g.bookPage == 4)
+    click(9 + 28, 10)
+    expect('book: a tab click turns to that page', App.g.book and App.g.bookPage == 1)
+    click(160, 100)
+    expect('book: a click elsewhere closes it', not App.g.book)
 
     App.run.index = 6
     App.run:advance()
@@ -415,7 +447,7 @@ return function(App)
     takeLand()
     App.g.mode = 'build'
     clearBoard()
-    App.run.blueprints.assembler = true
+    for _, kind in ipairs(require('src.data.machines').list) do App.run.blueprints[kind] = true end
     autoBuild()
     Game.setZoom(App.g, 8, 0, 0)
     App.move(300, 100)

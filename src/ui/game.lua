@@ -101,6 +101,9 @@ function Game.enter(app)
     hoverMod = nil,     -- the upgrade whose card is under the mouse
     sel = nil,          -- selected rectangle of tiles { x1, y1, x2, y2 }
     clip = nil,         -- what the stamp tool pastes: { w, h, items = { ... } }
+    picker = nil,       -- { e = filter entity }: the item chooser is open
+    filterItem = nil,   -- the item a filter in hand was set to
+    bookPage = old and old.bookPage or 1,
     cam = old and old.run == run and old.cam or nil,
     run = run,
   }
@@ -165,6 +168,13 @@ local function entityTip(app, e)
     end
     local u = F:utilisation(e)
     if u then tip.lines[#tip.lines + 1] = 'LAST SHIFT: BUSY ' .. pct(u) end
+  elseif e.filter then
+    if e.filter.item then
+      tip.lines = { Items[e.filter.item].name .. ' GOES STRAIGHT ON. EVERYTHING ELSE LEAVES THROUGH THE SIDES.' }
+    else
+      tip.lines = { 'NO ITEM SET: EVERYTHING LEAVES THROUGH THE SIDES.' }
+    end
+    if not live then tip.lines[2] = 'F: CHOOSE THE ITEM' end
   elseif e.belt and e.slot.passed and F.shift and F.shift.tick > 0 then
     tip.lines[#tip.lines + 1] = (live and 'CARRIED ' or 'LAST SHIFT: ') .. e.slot.passed ..
       ' (' .. pct(e.slot.passed / F.shift.tick) .. ' FULL)'
@@ -195,17 +205,17 @@ local function canPlace(app, kind, x, y)
   return e.building.kind == kind or (e.belt and kind ~= 'belt')
 end
 
-local function placeAt(app, kind, x, y, dir)
+-- extra: what Factory:place takes (a filter's item). Returns the piece.
+local function placeAt(app, kind, x, y, dir, extra)
   if not canPlace(app, kind, x, y) then return false end
   local F = app.run.factory
   local e = F:at(x, y)
   if e and e.building.kind == kind then
     e.building.dir = dir
-    return true
+    return e
   end
   if e then F:remove(x, y) end
-  F:place(kind, x, y, dir)
-  return true
+  return F:place(kind, x, y, dir, extra)
 end
 
 local function rotate(app, step)
@@ -245,7 +255,10 @@ local function copySelection(app, cut)
     for x = sel.x1, sel.x2 do
       local e = F:at(x, y)
       if e and not e.building.fixed then
-        clip.items[#clip.items + 1] = { dx = x - sel.x1, dy = y - sel.y1, kind = e.building.kind, dir = e.building.dir }
+        clip.items[#clip.items + 1] = {
+          dx = x - sel.x1, dy = y - sel.y1, kind = e.building.kind, dir = e.building.dir,
+          item = e.filter and e.filter.item or nil,
+        }
         if cut then F:remove(x, y) end
       end
     end
@@ -284,7 +297,7 @@ local function pasteStamp(app, cx, cy)
     local x, y = cx + it.dx, cy + it.dy
     if run:unlocked(it.kind) then
       if F:at(x, y) then F:remove(x, y) end
-      F:place(it.kind, x, y, it.dir)
+      F:place(it.kind, x, y, it.dir, { item = it.item })
     end
   end
   return true
@@ -294,7 +307,7 @@ end
 
 local function startShift(app)
   local g = app.g
-  g.tool, g.drag, g.sel = nil, nil, nil
+  g.tool, g.drag, g.sel, g.picker = nil, nil, nil, nil
   app.run:beginShift()
   g.mode, g.acc, g.frac, g.paused, g.popups = 'run', 0, 0, false, {}
   g.fx = Fx.new()
@@ -481,6 +494,15 @@ end
 local function drawBuilding(S, T, e, x, y, live)
   local b = e.building
   drawPiece(S, T, b, x, y, 1, e.port and e.port.item, e.port or (e.machine and e.slot))
+  if e.filter and e.filter.item then
+    -- What it lets straight through.
+    if T == 16 then
+      UI.rect(x + 5, y + 5, 6, 6, P.dark)
+      UI.sprite(Sprites.set[8].item[e.filter.item], x + 6, y + 6)
+    else
+      UI.rect(x + 3, y + 3, 2, 2, P[Items[e.filter.item].mat] or P.white)
+    end
+  end
   if e.export then
     -- A premium face: gold on the edge the items come in through.
     for d = 0, 3 do
@@ -500,7 +522,7 @@ local function drawBuilding(S, T, e, x, y, live)
       UI.rect(bx, by, floor(bw * min(1, m.craft.p / m.def.time)), 1, P.white)
     elseif m.def.generator and m.burn > 0 then
       UI.rect(bx, by, bw, 1, P.dark)
-      UI.rect(bx, by, floor(bw * m.burn / m.def.generator.burn), 1, P.orange)
+      UI.rect(bx, by, floor(bw * m.burn / m.burnMax), 1, P.orange)
     end
   end
 end
@@ -577,7 +599,7 @@ local function drawBoard(app)
       local px, py = tilePos(g, e.pos.x, e.pos.y)
       if e.belt then
         drawBelt(S, F, e, px, py, beltFrame)
-      elseif e.bridge or e.splitter then
+      elseif e.bridge or e.splitter or e.filter then
         drawBuilding(S, T, e, px, py, live)
       end
     end
@@ -595,7 +617,13 @@ local function drawBoard(app)
         local y = VY + (it.prev.y + (it.pos.y - it.prev.y) * f) * T + off - cam.y
         x, y = floor(x + 0.5), floor(y + 0.5)
         if x > VX - T and x < VX + VW and y > VY - T and y < VY + VH then
-          UI.sprite(S.item[it.item.type], x, y)
+          if it.item.pack then
+            -- A crate, with what is in it showing through the window.
+            UI.sprite(S.crate, x, y)
+            if big then UI.sprite(Sprites.set[8].item[it.item.type], x + 2, y + 2) end
+          else
+            UI.sprite(S.item[it.item.type], x, y)
+          end
           if it.item.polished > 0 then
             if big then
               local blink = floor(app.time * 6 + it.id) % 3
@@ -613,7 +641,7 @@ local function drawBoard(app)
   -- Things items disappear into.
   for i = 1, #buildings do
     local e = buildings[i]
-    if not (e.belt or e.bridge or e.splitter) and visible(e) then
+    if not (e.belt or e.bridge or e.splitter or e.filter) and visible(e) then
       local px, py = tilePos(g, e.pos.x, e.pos.y)
       drawBuilding(S, T, e, px, py, live)
     end
@@ -663,7 +691,8 @@ local function drawBoard(app)
 
   Fx.drawFlashes(g.fx, VX - cam.x, VY - cam.y, T)
 
-  local overlay = g.mode == 'intro' or g.mode == 'summary' or g.mode == 'over' or g.mode == 'win' or g.book
+  local overlay = g.mode == 'intro' or g.mode == 'summary' or g.mode == 'over' or g.mode == 'win'
+    or g.book or g.picker
   local cx, cy = cellAt(g, UI.mx, UI.my)
 
   if g.mode == 'annex' then
@@ -824,7 +853,8 @@ end
 
 local HINTS = {
   annex = { 'CLICK A FREE', 'PLOT TO PLACE', 'YOUR NEW LAND.' },
-  build = { 'LMB PLACE', 'RMB REMOVE', 'R   ROTATE', 'V   SELECT', 'WHEEL ZOOM', 'WASD MOVE', 'TAB RECIPES', 'U   BUSY %' },
+  build = { 'LMB PLACE', 'RMB REMOVE', 'R   ROTATE', 'V   SELECT', 'F   FILTER', 'WHEEL ZOOM', 'WASD MOVE',
+    'TAB RECIPES', 'U   BUSY %' },
   select = { 'DRAG A BOX', 'C   COPY', 'X   CUT', 'DEL REMOVE', 'Q   CANCEL' },
   stamp = { 'LMB PASTE', 'R   ROTATE', 'Q   DONE' },
   run = { 'SPACE PAUSE', '1 2 3 SPEED', 'HOVER A', 'MACHINE TO', 'SEE HOW BUSY', 'IT IS.' },
@@ -960,7 +990,7 @@ local function drawPalette(app)
     end
     if g.mode == 'build' and UI.clicked(x, PY + 1, CELL, 19) then
       g.tool = (g.tool ~= kind) and kind or nil
-      g.sel = nil
+      g.sel, g.filterItem = nil, nil
     end
   end
 end
@@ -969,6 +999,48 @@ end
 
 local function dim()
   UI.rect(VX, VY, VW, VH, P.dark, 0.6)
+end
+
+-- The item chooser of a filter: every item in the game, one click to set.
+local PICK = { cols = 10, cell = 14 }
+
+local function drawPicker(app)
+  local g = app.g
+  local e = g.picker.e
+  local rows = math.ceil(#Items.list / PICK.cols)
+  local w, h = PICK.cols * PICK.cell + 8, rows * PICK.cell + 34
+  local x, y = floor(CX - w / 2), floor(VY + (VH - h) / 2)
+  dim()
+  UI.panel(x, y, w, h, P.panel, P.line)
+  UI.text('FILTER: WHICH ITEM GOES STRAIGHT ON?', x + 4, y + 4, P.text)
+  local hover
+  for i, id in ipairs(Items.list) do
+    local cx = x + 4 + ((i - 1) % PICK.cols) * PICK.cell
+    local cy = y + 13 + floor((i - 1) / PICK.cols) * PICK.cell
+    local hot = UI.inside(cx, cy, PICK.cell, PICK.cell)
+    if e.filter.item == id then UI.rect(cx, cy, PICK.cell, PICK.cell, P.line) end
+    if hot then
+      UI.frame(cx, cy, PICK.cell, PICK.cell, P.yellow)
+      hover = id
+    end
+    UI.sprite(Sprites.item[id], cx + 3, cy + 3)
+    if UI.clicked(cx, cy, PICK.cell, PICK.cell) then
+      e.filter.item = id
+      g.filterItem = id
+      g.picker = nil
+      return
+    end
+  end
+  local by = y + h - 18
+  UI.text(hover and Items[hover].name or (e.filter.item and ('NOW: ' .. Items[e.filter.item].name) or 'NOTHING SET'),
+    x + 4, by + 4, hover and P.gold or P.dim)
+  if UI.button('NONE', x + w - 34, by, 30, 12) then
+    e.filter.item = nil
+    g.picker = nil
+    return
+  end
+  -- A click anywhere else closes it.
+  if UI.click and not UI.inside(x, y, w, h) then g.picker = nil end
 end
 
 local function drawIntro(app)
@@ -1118,9 +1190,10 @@ function Game.draw(app)
   elseif g.mode == 'summary' then drawSummary(app)
   elseif g.mode == 'over' then drawEnd(app, false)
   elseif g.mode == 'win' then drawEnd(app, true) end
+  if g.picker then drawPicker(app) end
   if g.book then
     Book.draw(app)
-  elseif UI.tip then
+  elseif UI.tip and not g.picker then
     UI.drawTip(UI.tip, UI.mx, UI.my)
   end
 end
@@ -1129,7 +1202,14 @@ end
 
 function Game.press(app, x, y, b)
   local g = app.g
-  if g.book then g.book = false; return end
+  if g.book then
+    g.book = Book.press(app, x, y)
+    return
+  end
+  if g.picker then
+    UI.click = { x = x, y = y, b = b }     -- the chooser handles its own clicks
+    return
+  end
   if g.mode == 'summary' and not revealDone(g) then
     completeReveal(g)     -- the first press only finishes the playback
     return
@@ -1161,13 +1241,17 @@ function Game.press(app, x, y, b)
     elseif g.tool == 'stamp' then
       pasteStamp(app, cx, cy)
     elseif g.tool then
-      placeAt(app, g.tool, cx, cy, g.dir)
+      local fresh = F:at(cx, cy) == nil or F:at(cx, cy).building.kind ~= g.tool
+      local e = placeAt(app, g.tool, cx, cy, g.dir, { item = g.filterItem })
       g.drag = { x = cx, y = cy, tool = g.tool }
+      -- A new filter asks at once what it should let through.
+      if e and fresh and e.filter and not e.filter.item then g.picker = { e = e } end
     else
       g.sel = nil
       local e = F:at(cx, cy)
       if e and not e.building.fixed then       -- pick it up to move it
         g.tool, g.dir = e.building.kind, e.building.dir
+        g.filterItem = e.filter and e.filter.item or nil
         F:remove(cx, cy)
       end
     end
@@ -1232,7 +1316,8 @@ end
 function Game.key(app, key)
   local g = app.g
   if key == 'tab' then g.book = not g.book; return end
-  if g.book then return end
+  if g.book then Book.key(app, key); return end
+  if g.picker then return end
   if key == 'u' then g.stats = not g.stats; return end
   if key == 'z' and g.mode ~= 'annex' then
     Game.wheel(app, g.cam.T == 8 and 1 or -1)
@@ -1242,7 +1327,12 @@ function Game.key(app, key)
     if key == 'space' or key == 'return' then g.mode = 'build' end
   elseif g.mode == 'build' then
     if key == 'r' then rotate(app, 1)
-    elseif key == 'q' then g.tool, g.sel = nil, nil
+    elseif key == 'f' then
+      -- Choose what the filter under the mouse lets through.
+      local cx, cy = cellAt(g, UI.mx, UI.my)
+      local e = cx and app.run.factory:at(cx, cy)
+      if e and e.filter then g.picker = { e = e } end
+    elseif key == 'q' then g.tool, g.sel, g.filterItem = nil, nil, nil
     elseif key == 'v' then g.tool = (g.tool ~= 'select') and 'select' or nil
     elseif key == 'c' then copySelection(app, false)
     elseif key == 'x' then copySelection(app, true)
@@ -1254,7 +1344,7 @@ function Game.key(app, key)
       local kind = n and g.entries and g.entries[n + 1]
       if kind then
         g.tool = (g.tool ~= kind) and kind or nil
-        g.sel = nil
+        g.sel, g.filterItem = nil, nil
       end
     end
   elseif g.mode == 'run' then
@@ -1274,7 +1364,8 @@ end
 function Game.cancel(app)
   local g = app.g
   if g.book then g.book = false; return true end
-  if g.mode == 'build' and (g.tool or g.sel) then g.tool, g.sel = nil, nil; return true end
+  if g.picker then g.picker = nil; return true end
+  if g.mode == 'build' and (g.tool or g.sel) then g.tool, g.sel, g.filterItem = nil, nil, nil; return true end
   return false
 end
 

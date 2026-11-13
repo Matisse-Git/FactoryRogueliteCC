@@ -20,9 +20,11 @@ Contracts.startPlot = { items = { 'iron_ore', 'copper_ore' }, rocks = 0 }
 -- New land, by sector: one plot is annexed for every contract after the
 -- first. `ports` and `rocks` are { min, max }.
 Contracts.land = {
-  { resources = { 'iron_ore', 'copper_ore', 'coal' },             ports = { 1, 2 }, rocks = { 1, 3 } },
-  { resources = { 'iron_ore', 'copper_ore', 'coal', 'gold_ore' }, ports = { 2, 2 }, rocks = { 2, 4 } },
-  { resources = { 'iron_ore', 'copper_ore', 'coal', 'gold_ore' }, ports = { 2, 3 }, rocks = { 2, 5 } },
+  { resources = { 'iron_ore', 'copper_ore', 'coal', 'quartz' },   ports = { 1, 2 }, rocks = { 1, 3 } },
+  { resources = { 'iron_ore', 'copper_ore', 'coal', 'quartz', 'gold_ore', 'crude' },
+    ports = { 2, 2 }, rocks = { 2, 4 } },
+  { resources = { 'iron_ore', 'copper_ore', 'coal', 'quartz', 'gold_ore', 'crude' },
+    ports = { 2, 3 }, rocks = { 2, 5 } },
 }
 Contracts.specials = { 'pad', 'node', 'rich', 'premium' }
 Contracts.specialChance = 60   -- percent of new plots that carry one
@@ -70,9 +72,9 @@ Contracts.bosses = {
   },
   {
     id = 'inspection', name = 'Inspection',
-    desc = 'Raw ore and dust sell for $0.',
+    desc = 'Raw materials and dust sell for $0.',
     value = function(s, ctx)
-      if ctx.form == 'ore' or ctx.form == 'dust' then ctx.value = 0 end
+      if ctx.tier == 1 then ctx.value = 0 end
     end,
   },
 }

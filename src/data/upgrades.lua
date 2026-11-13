@@ -12,7 +12,8 @@
 --   speed(F, e)         return a speed multiplier for machine entity e
 --   draw(F, e, watts)   return the watts machine entity e draws
 --
--- ctx = { type, form, mats, polished, dist, tick, len, value, premium }
+-- ctx = { type, form, tier, mats, polished, units, dist, tick, len, value, premium }
+--       units: 1, or 4 for a crate (whose value is already that of the four)
 -- sc  = { revenue, mult, notes, sold, kinds, perfect, spare }
 --       perfect: every machine worked at least 90% of the shift
 --       spare:   watts of supply left unused, on average
@@ -31,6 +32,7 @@ local INGOT_OF = {
   iron_ore = 'iron_ingot', iron_dust = 'iron_ingot',
   copper_ore = 'copper_ingot', copper_dust = 'copper_ingot',
   gold_ore = 'gold_ingot', gold_dust = 'gold_ingot',
+  quartz = 'glass', sand = 'glass',
 }
 
 local function countNeighbors(F, e, test)
@@ -105,14 +107,14 @@ local list = {
   },
   {
     id = 'pressure', name = 'Pressure', code = 'PD', color = 'cyan', cost = 6,
-    desc = 'A press turns coal into a diamond worth $15.',
+    desc = 'A press turns coal into a diamond worth $8.',
     setup = function(r)
       r:addRecipe('press', Recipes.make({ { 'coal', 1 } }, { { 'diamond', 1 } }))
     end,
   },
   {
     id = 'scrap_dealer', name = 'Scrap Dealer', code = 'SD', color = 'green', cost = 5,
-    desc = 'Raw ore and dust sell for the value of their ingot.',
+    desc = 'Ore, dust, quartz and sand sell for the value of what a smelter makes of them.',
     sellAs = function(s, ctx) ctx.type = INGOT_OF[ctx.type] or ctx.type end,
   },
   {
