@@ -25,7 +25,8 @@ Map.PREMIUM = 1.5          -- price multiplier at a premium depot face
 Map.DEPOT = { { 3, 2 }, { 4, 2 }, { 3, 3 }, { 4, 3 } }   -- plot-local depot tiles
 
 function Map.new()
-  return setmetatable({ plots = {}, count = 0, premium = 0 }, Map)
+  -- order: the plots in the order they were annexed (a save replays it).
+  return setmetatable({ plots = {}, order = {}, count = 0, premium = 0 }, Map)
 end
 
 local function slotIndex(sx, sy) return sy * Map.COLS + sx end
@@ -99,6 +100,7 @@ function Map:annex(plot, sx, sy, F)
   assert(self:canAnnex(sx, sy), 'slot not free')
   plot.sx, plot.sy = sx, sy
   self.plots[slotIndex(sx, sy)] = plot
+  self.order[#self.order + 1] = plot
   self.count = self.count + 1
   self:stamp(plot, F)
   return plot

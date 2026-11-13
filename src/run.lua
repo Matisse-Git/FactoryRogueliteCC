@@ -425,6 +425,75 @@ function Run:advance()
   self:startContract()
 end
 
+---------------------------------------------------------------- saving
+
+-- Everything needed to rebuild this run, as plain data (see src/save.lua).
+-- It refers to the run's own tables: encode it before the run moves on.
+function Run:snapshot()
+  local F = self.factory
+  local d = {
+    seed = self.seed, credits = self.credits, index = self.index, progress = self.progress,
+    shiftsUsed = self.shiftsUsed, won = self.won, lost = self.lost, endless = self.endless, bonus = self.bonus,
+    blueprints = self.blueprints, upgrades = self.upgrades, levels = self.levels, recipes = self.recipes,
+    soldValue = self.soldValue, lastPayout = self.lastPayout,
+    rng = { layout = self.layoutRng.s, shop = self.shopRng.s, market = self.marketRng.s, boss = self.bossRng.s },
+    bossOrder = self.bossOrder, finalOrder = self.finalOrder, bosses = {},
+    market = self.market, offers = self.offers, reward = self.reward, pendingPlot = self.pendingPlot,
+    shop = self.shop and { offers = self.shop.offers, rerolls = self.shop.rerolls } or nil,
+    plots = self.map.order, pieces = {}, rubble = {}, closed = false,
+  }
+  for sector, boss in pairs(self.bosses) do d.bosses[sector] = { id = boss.id, params = boss.params } end
+  for i, offer in ipairs(self.offers or {}) do
+    if offer == self.chosen then d.chosen = i end
+  end
+  for _, e in ipairs(F.world:query('building')) do
+    local b = e.building
+    if e.rubble then
+      d.rubble[#d.rubble + 1] = { e.pos.x, e.pos.y }
+    elseif not b.fixed then
+      d.pieces[#d.pieces + 1] = { b.kind, e.pos.x, e.pos.y, b.dir, e.filter and e.filter.item or false }
+    elseif e.export and next(e.export.closed) then
+      d.closed = true
+    end
+  end
+  return d
+end
+
+-- The run a snapshot describes.
+function Run.restore(d)
+  local r = setmetatable({}, Run)
+  r.seed, r.credits, r.index, r.progress = d.seed, d.credits, d.index, d.progress
+  r.shiftsUsed, r.won, r.lost, r.endless, r.bonus = d.shiftsUsed, d.won or false, d.lost or false, d.endless, d.bonus
+  r.blueprints, r.upgrades, r.levels, r.recipes = d.blueprints or {}, d.upgrades or {}, d.levels or {}, d.recipes or {}
+  r.soldValue, r.lastPayout = d.soldValue or {}, d.lastPayout
+  r.layoutRng, r.shopRng, r.marketRng, r.bossRng = Rng.new(1), Rng.new(1), Rng.new(1), Rng.new(1)
+  r.layoutRng.s, r.shopRng.s, r.marketRng.s, r.bossRng.s = d.rng.layout, d.rng.shop, d.rng.market, d.rng.boss
+  r.bossOrder, r.finalOrder, r.bosses = d.bossOrder, d.finalOrder, {}
+  for sector, b in pairs(d.bosses or {}) do
+    r.bosses[sector] = Bosses.make(Bosses.byId[b.id], b.params)
+  end
+  r.market, r.offers, r.reward, r.pendingPlot = d.market, d.offers, d.reward, d.pendingPlot
+  r.chosen = d.chosen and r.offers and r.offers[d.chosen] or nil
+  r.shop = d.shop
+
+  -- The site: the plots in the order they were annexed, then what was built.
+  r.factory = Factory.new(Map.W, Map.H)
+  r.map = Map.new()
+  for _, plot in ipairs(d.plots) do r.map:annex(plot, plot.sx, plot.sy, r.factory) end
+  for _, t in ipairs(d.rubble or {}) do
+    if not r.factory:at(t[1], t[2]) then r.factory:place('rubble', t[1], t[2], 0) end
+  end
+  for _, piece in ipairs(d.pieces or {}) do
+    local kind, x, y, dir, item = piece[1], piece[2], piece[3], piece[4], piece[5]
+    if Machines[kind] and r.map:owned(x, y) and not r.factory:at(x, y) then
+      r.factory:place(kind, x, y, dir, { item = item or nil })
+    end
+  end
+  if d.closed then r:closeFaces() end
+  r:refreshRules()
+  return r
+end
+
 ---------------------------------------------------------------- shop
 
 function Run:hasRecipe(id)

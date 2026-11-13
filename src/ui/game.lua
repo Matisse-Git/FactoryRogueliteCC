@@ -12,6 +12,8 @@ local UI = require 'src.ui.ui'
 local Fx = require 'src.ui.fx'
 local Book = require 'src.ui.book'
 local Fmt = require 'src.fmt'
+local Sfx = require 'src.sfx'
+local Records = require 'src.records'
 local Land = require 'src.ui.land'
 local Board = require 'src.ui.board'
 local Market = require 'src.market'
@@ -316,9 +318,11 @@ end
 local function startShift(app)
   local g = app.g
   g.tool, g.drag, g.sel, g.picker = nil, nil, nil, nil
+  app.save()                 -- the layout as it goes into the shift
   app.run:beginShift()
   g.mode, g.acc, g.frac, g.paused, g.popups = 'run', 0, 0, false, {}
   g.fx = Fx.new()
+  Sfx.play('start')
 end
 
 -- The summary plays out: the items at once, then one end-of-shift line per
@@ -328,6 +332,8 @@ local function finishShift(app)
   g.summary = app.run:endShift()
   g.mode, g.frac = 'summary', 1
   g.reveal = { t = 0, shown = 0, n = #g.summary.results }
+  g.summary.record = Records.shiftEnded(g.summary.total)
+  Sfx.play('finish')
 end
 
 local function revealDone(g)
@@ -382,8 +388,11 @@ local function stepSim(app)
           best = best, color = color,
         }
       end
+      -- Dearer sales ring higher.
+      Sfx.play('sale', 0.8 + 0.1 * math.min(8, math.log10(1 + ev.value)))
     elseif ev.kind == 'trigger' then
       Fx.trigger(g.fx, ev)
+      if ev.delta < 0 then Sfx.play('bad') elseif ev.what ~= 'sale' and not ev.mod.quiet then Sfx.play('mod') end
     end
   end
   if F:finished() then finishShift(app) end
@@ -401,17 +410,23 @@ local function afterSummary(app)
   run.factory:clearItems()
   if status == 'next' then
     g.mode = 'build'
+    app.save()
   elseif status == 'cleared' then
     run:payout()
+    g.record = Records.contractCleared(run.index, run:total(), run.seed)
+    Sfx.play('clear')
     if run.index == run:total() then
       -- The last contract: the run is won. Going on from here is endless mode.
       run.won = true
       g.mode = 'win'
+      app.save()
     else
       Game.goOn(app)
     end
   else
     g.mode = 'over'
+    Sfx.play('fail')
+    app.save()                 -- which removes the save: the run is over
   end
 end
 
@@ -420,6 +435,7 @@ end
 function Game.goOn(app)
   app.run:afterContract()
   app.state = 'board'
+  app.save()
 end
 
 function Game.update(app, dt)
@@ -813,7 +829,7 @@ local function drawTopBar(app)
     -- The boss this sector is heading for, so it can be prepared for.
     local boss = c.sectorBoss
     local text, bx = 'BOSS IN ' .. c.bossIn .. ': ' .. boss.name, 3 + Font.width(label) + 8
-    UI.text(text, bx, 2, P.redD)
+    UI.text(text, bx, 2, P.orange)
     if UI.inside(bx, 0, Font.width(text), 8) then
       UI.tip = { title = boss.name, color = P.red, lines = { boss.desc,
         'IN ' .. c.bossIn .. (c.bossIn == 1 and ' CONTRACT.' or ' CONTRACTS.') } }
@@ -1242,7 +1258,7 @@ local function drawSummary(app)
     end
     yy = yy + 8
   end
-  UI.text('SHIFT TOTAL', x + 8, yy, P.text)
+  UI.text(s.record and revealDone(g) and 'SHIFT TOTAL: BEST EVER' or 'SHIFT TOTAL', x + 8, yy, s.record and revealDone(g) and P.gold or P.text)
   UI.textRight(Fmt.money(revealedTotal(g)), x + w - 8, yy, P.gold)
   if not revealDone(g) then return end
 
@@ -1268,6 +1284,7 @@ local function drawEnd(app, won)
   local x, y = floor(CX - w / 2), 43
   local cx = x + w / 2
   UI.panel(x, y, w, h, P.panel, won and P.gold or P.red)
+  if app.g.record then UI.textCenter('NEW RECORD: ' .. Records.contract .. ' CONTRACTS CLEARED', cx, y - 9, P.gold) end
   if won then
     UI.textCenter('ALL QUOTAS MET', cx, y + 10, P.gold, 2)
     UI.textCenter('THE FACTORY IS YOURS.', cx, y + 28, P.text)
@@ -1344,6 +1361,8 @@ function Game.press(app, x, y, b)
       -- Back to work, looking at the new land.
       g.mode = 'intro'
       setZoom(g, 16, sx * Map.PW + Map.PW / 2, sy * Map.PH + Map.PH / 2)
+      Sfx.play(app.run:contract().boss and 'boss' or 'land')
+      app.save()
     end
     return
   end
@@ -1358,10 +1377,11 @@ function Game.press(app, x, y, b)
       g.sel = { x1 = cx, y1 = cy, x2 = cx, y2 = cy }
       g.drag = { select = true, x = cx, y = cy }
     elseif g.tool == 'stamp' then
-      pasteStamp(app, cx, cy)
+      Sfx.play(pasteStamp(app, cx, cy) and 'place' or 'error')
     elseif g.tool then
       local fresh = F:at(cx, cy) == nil or F:at(cx, cy).building.kind ~= g.tool
       local e = placeAt(app, g.tool, cx, cy, g.dir, { item = g.filterItem })
+      Sfx.play(e and 'place' or 'error')
       g.drag = { x = cx, y = cy, tool = g.tool }
       -- A new filter asks at once what it should let through.
       if e and fresh and e.filter and not e.filter.item then g.picker = { e = e } end
@@ -1372,10 +1392,11 @@ function Game.press(app, x, y, b)
         g.tool, g.dir = e.building.kind, e.building.dir
         g.filterItem = e.filter and e.filter.item or nil
         F:remove(cx, cy)
+        Sfx.play('rotate')
       end
     end
   elseif b == 2 then
-    F:remove(cx, cy)
+    if F:remove(cx, cy) then Sfx.play('remove') end
     g.drag = { x = cx, y = cy, erase = true }
   end
 end
@@ -1407,12 +1428,12 @@ function Game.moved(app, x, y)
     if math.abs(dx) >= math.abs(dy) then dir = dx > 0 and 0 or 2 else dir = dy > 0 and 1 or 3 end
     local nx, ny = d.x + D.DX[dir], d.y + D.DY[dir]
     if d.erase then
-      F:remove(nx, ny)
+      if F:remove(nx, ny) then Sfx.play('remove') end
     elseif d.tool == 'belt' then
       local prev = F:at(d.x, d.y)
       if prev and prev.belt then prev.building.dir = dir end
       g.dir = dir
-      placeAt(app, 'belt', nx, ny, dir)
+      if placeAt(app, 'belt', nx, ny, dir) then Sfx.play('place') end
     end
     d.x, d.y = nx, ny
   end

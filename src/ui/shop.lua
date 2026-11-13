@@ -16,6 +16,7 @@ local Upgrades = require 'src.data.upgrades'
 local Investments = require 'src.data.investments'
 local Alternates = require 'src.data.alternates'
 local Items = require 'src.data.items'
+local Sfx = require 'src.sfx'
 
 local Shop = {}
 
@@ -28,6 +29,7 @@ local function leave(app)
   app.run:advance()
   require('src.ui.game').enter(app)
   app.state = 'game'
+  app.save()
 end
 
 -- Where offer i sits: investments on the second row, the rest on the first.
@@ -140,6 +142,8 @@ local function drawOffer(app, i, o)
   elseif UI.button('BUY $' .. o.cost, x + 4, by, w - 8, 12, { disabled = blocked ~= nil, color = P.gold }) then
     run:buy(i)
     shop.replace = nil
+    Sfx.play('buy')
+    app.save()
   end
   if hot then
     local tip = d.tip
@@ -171,9 +175,13 @@ local function drawOwned(app)
             or (ok and UI.clicked(x, y, 30, 16)) then
           run:replaceUpgrade(i, picking)
           shop.replace = nil
+          Sfx.play('buy')
+          app.save()
         end
       elseif UI.button('SELL ' .. refund, x, y + 17, 30, 9) or UI.clicked(x, y, 30, 16, 2) then
         run:sellUpgrade(i)
+        Sfx.play('sell')
+        app.save()
       end
     else
       UI.emptySlot(x + 7, y)
@@ -247,6 +255,7 @@ function Shop.draw(app)
   if UI.button('REROLL $' .. cost, 8, 123, 70, 12, { disabled = run.credits < cost }) then
     run:reroll()
     shop.replace = nil
+    app.save()
   end
   if UI.inside(8, 123, 70, 12) then
     UI.tip = { title = 'REROLL', color = P.text, lines = {

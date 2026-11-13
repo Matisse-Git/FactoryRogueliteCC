@@ -7,6 +7,8 @@ local Settings = {
   seeded = false,      -- the custom sliders have been given a starting value
   scanlines = 50, glow = 50, vignette = 50, fringe = 50, bulge = 50,
 
+  sound = 70,          -- effects volume, 0 (off) to 100 in steps of 10
+
   fullscreen = false,
   integer = true,      -- scale the picture by whole numbers only
   persist = true,      -- the screenshot script turns this off
@@ -16,7 +18,7 @@ local Settings = {
 Settings.PARTS = { 'scanlines', 'glow', 'vignette', 'fringe', 'bulge' }
 
 local FILE = 'settings.txt'
-local NUMBERS = { 'crt', 'scanlines', 'glow', 'vignette', 'fringe', 'bulge' }
+local NUMBERS = { 'crt', 'scanlines', 'glow', 'vignette', 'fringe', 'bulge', 'sound' }
 local SWITCHES = { 'custom', 'seeded', 'fullscreen', 'integer' }
 local kind = {}
 for _, key in ipairs(NUMBERS) do kind[key] = 'number' end

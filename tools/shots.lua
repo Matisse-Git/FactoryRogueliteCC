@@ -14,6 +14,9 @@ return function(App)
   local Pause = require 'src.ui.pause'
   local Board = require 'src.ui.board'
   local Shop = require 'src.ui.shop'
+  local Title = require 'src.ui.title'
+  local Save = require 'src.save'
+  local Records = require 'src.records'
   local Crt = require 'src.gfx.crt'
   local Contracts = require 'src.data.contracts'
   local Upgrades = require 'src.data.upgrades'
@@ -141,6 +144,7 @@ return function(App)
   local co = coroutine.create(function()
     wait(3)
     shot('01_title')
+    expect('sound: the effects were built (and are muted here)', require('src.sfx').ok)
 
     App.seed = 4242
     App.keypressed('return')
@@ -651,8 +655,18 @@ return function(App)
     ---------------------------------------------------------- settings panel
     expect('crt: the filter is available', Crt.ok)
     expect('settings: defaults', Settings.crt == 50 and Settings.integer)
-    click(160, 160)
+    expect('a run that ended leaves nothing to continue', not App.hasSave())
+    click(Title.at.records)
+    expect('title: RECORDS opens the records', App.overlay == 'records' and Records.contract >= 12 and Records.wins == 1)
+    App.move(300, 20)
+    wait(2)
+    shot('19a_records')
+    App.keypressed('escape')
+    expect('records: Esc closes them', App.overlay == nil and App.state == 'title')
+    click(Title.at.settings)
     expect('settings: the title button opens the panel', App.overlay == 'settings')
+    click(Panel.stop(30, 'sound'))
+    expect('settings: the sound slider sets the volume', Settings.sound == 30)
     local seed = App.seed
     App.keypressed('3')
     expect('settings: keys do not reach the screen underneath', App.seed == seed)
@@ -805,6 +819,66 @@ return function(App)
     App.g.paused = false
     Game.fastForward(App)
 
+    ---------------------------------------------------------- save and continue
+    App.g.summary.status = 'next'
+    Game.afterSummary(App)
+    Game.setZoom(App.g, 16, ox + 4, oy + 3)
+    App.g.tool, App.g.dir = 'filter', 2
+    click(cell(ox + 1, oy + 4))
+    App.g.picker.e.filter.item = 'gear'
+    App.g.picker = nil
+    App.keypressed('q')
+    local pieces, used, credits = #f.world:query('building'), App.run.shiftsUsed, App.run.credits
+    App.keypressed('escape')
+    expect('pause: opening the menu saves the run', App.overlay == 'pause' and App.hasSave())
+    click(Pause.at('quit'))
+    expect('pause: SAVE AND QUIT returns to the title, run kept',
+      App.state == 'title' and App.overlay == nil and App.run == nil and App.hasSave())
+    App.move(300, 20)
+    wait(2)
+    shot('27_title_continue')
+    click(Title.at.continue)
+    f = F()
+    local filter = f:at(ox + 1, oy + 4)
+    expect('title: CONTINUE picks the run up where it was',
+      App.state == 'game' and App.g.mode == 'build' and App.run.seed == 4242
+      and #f.world:query('building') == pieces and App.run.shiftsUsed == used and App.run.credits == credits)
+    expect('continue: pieces keep their direction and filters their item',
+      filter and filter.filter and filter.filter.item == 'gear' and filter.building.dir == 2)
+
+    -- Closing the game mid-shift: the shift has not happened.
+    local banked = App.run.progress
+    Game.startShift(App)
+    App.g.acc = 20.5
+    wait(2)
+    App.quit()
+    App.saveAndQuit()
+    App.continueRun()
+    expect('continue: a shift cut short is simply run again',
+      App.g.mode == 'build' and App.run.shiftsUsed == used and App.run.progress == banked)
+
+    -- In the shop.
+    App.run.progress = App.run:contract().quota
+    Game.startShift(App)
+    Game.fastForward(App)
+    App.save()
+    App.saveAndQuit()
+    App.continueRun()
+    expect('continue: a cleared contract is collected on return', App.state == 'board' and #App.run.offers == 2)
+    click(Board.at(1))
+    App.run.credits = 30
+    click(Shop.offerXY(App, 4))
+    local level = App.run.levels[App.run.shop.offers[4].id]
+    App.saveAndQuit()
+    App.continueRun()
+    expect('continue: the shop is as you left it',
+      App.state == 'shop' and App.run.shop.offers[4].sold and App.run.levels[App.run.shop.offers[4].id] == level
+      and App.run.chosen == App.run.offers[1])
+    click(Shop.at.next)
+    expect('continue: and the run goes on', App.state == 'game' and App.run.index == 2 and App.g.mode == 'annex')
+    takeLand()
+    click(Game.at.intro)
+
     ---------------------------------------------------------- abandoning
     App.keypressed('escape')
     click(Pause.at('abandon'))
@@ -815,6 +889,8 @@ return function(App)
     expect('abandon: moving away takes the question back', App.overlay == 'pause' and App.state == 'game')
     click(Pause.at('abandon'))
     expect('abandon: a second click ends the run', App.overlay == nil and App.state == 'title')
+    expect('abandon: and removes its save', not App.hasSave())
+    Save.delete()
 
     print('screenshots saved to ' .. love.filesystem.getSaveDirectory())
   end)

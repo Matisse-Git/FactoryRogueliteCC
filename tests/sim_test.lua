@@ -784,6 +784,100 @@ return function()
       Market.units('gear', 5))
   end
 
+  -- 10j. Saving a run and picking it up again.
+  do
+    local Save = require 'src.save'
+    local Records = require 'src.records'
+    local Route = require 'tests.route'
+    local Bosses = require 'src.data.bosses'
+
+    check('a save holds data, never code',
+      Save.encode({ b = 1, a = function() end, mod = { x = 1 }, list = { 'x', true, 2.5 } }) == 'return {b=1,list={[1]="x",[2]=true,[3]=2.5}}',
+      Save.encode({ b = 1, a = function() end, mod = { x = 1 }, list = { 'x', true, 2.5 } }))
+    check('and loading one runs none', Save.decode('return os.time()') == nil and Save.decode('return {') == nil
+      and Save.decode('return 5') == nil and Save.decode('return {a={b=2}}').a.b == 2)
+
+    -- A run with a bit of everything in it.
+    local function describe(run)
+      local parts = { run.credits, run.index, run.progress, run.shiftsUsed, run:basePower() }
+      -- Every piece on the board, whatever order it was placed in.
+      local pieces = {}
+      for _, e in ipairs(run.factory.world:query('building')) do
+        local b = e.building
+        pieces[#pieces + 1] = b.kind .. e.pos.x .. ',' .. e.pos.y .. ',' .. b.dir
+          .. (e.port and (e.port.item .. e.port.period) or '') .. (e.filter and tostring(e.filter.item) or '')
+      end
+      table.sort(pieces)
+      parts[#parts + 1] = table.concat(pieces, ' ')
+      for _, d in ipairs(run.market.demand) do parts[#parts + 1] = d.item .. d.units end
+      for _, id in ipairs(run.upgrades) do parts[#parts + 1] = id end
+      for _, id in ipairs(run.recipes) do parts[#parts + 1] = id end
+      for _, m in ipairs(run.rules.mods) do parts[#parts + 1] = m.id end
+      for sector = 1, 5 do parts[#parts + 1] = run.bosses[sector] and run.bosses[sector].desc or '-' end
+      return table.concat(parts, ' ')
+    end
+    local function play(run)
+      run:beginShift()
+      while not run.factory:finished() do run.factory:step() end
+      return run:endShift()
+    end
+    local function offerText(run)
+      local parts = {}
+      for _, o in ipairs(run:rollOffers()) do
+        for _, p in ipairs(o.plot and o.plot.ports or {}) do parts[#parts + 1] = p.item .. p.x .. p.y end
+        for _, d in ipairs(o.market.demand) do parts[#parts + 1] = d.item end
+      end
+      run:openShop()
+      for _, o in ipairs(run.shop.offers) do parts[#parts + 1] = o.id end
+      return table.concat(parts, ' ')
+    end
+
+    local run = Run.new(77)
+    run.credits = 200
+    run.blueprints.assembler, run.blueprints.wiremill = true, true
+    run.upgrades = { 'bullion', 'scenic_route' }
+    run.levels = { power = 2, ['value:iron'] = 3, ['speed:smelter'] = 1, ['rate:copper_ore'] = 2 }
+    run.recipes = { 'twin_dies' }
+    run:rollOffers()
+    run:choose(2)
+    run:advance()
+    local slot = run.map:free()[1]
+    run:annex(slot[1], slot[2])
+    run.pendingPlot = require('src.map').generate(require('src.rng').new(5), { items = { 'coal' }, special = 'premium' })
+    slot = run.map:free()[2]
+    run:annex(slot[1], slot[2])
+    run.bosses[1] = Bosses.make(Bosses.byId.blackout, { plots = { { slot[1], slot[2] } } })
+    for i, port in ipairs(Route.ports(run)) do
+      Route.belt(run, port, i <= 2 and { 'smelter', 'press' } or { 'filter' })
+    end
+    for _, e in ipairs(run.factory.world:query('filter')) do e.filter.item = 'coal' end
+    run:placeRubble(3)
+    run:refreshRules()
+    play(run)
+    run:rollOffers()
+    run:choose(1)
+    run:openShop()
+
+    local copy = Run.restore(Save.decode(Save.encode(run:snapshot())))
+    check('a restored run is the same run', describe(copy) == describe(run), describe(copy))
+    check('down to the land, the rubble, the premium face and what is on offer',
+      copy.map.count == run.map.count and copy.map.premium == 1 and #copy.factory.world:query('rubble') == 3
+      and #copy.offers == 2 and copy.chosen == copy.offers[1] and #copy.shop.offers == #run.shop.offers
+      and copy.shop.offers[1].id == run.shop.offers[1].id)
+    local a, b = play(run), play(copy)
+    check('it earns the same', a.total == b.total and a.total > 0 and copy.progress == run.progress, a.total .. ' vs ' .. b.total)
+    check('and its dice roll on from where they were', offerText(copy) == offerText(run))
+
+    -- Records.
+    Records.persist = false
+    Records.shift, Records.contract, Records.wins = 100, 3, 0
+    check('a better shift is a record, a worse one is not',
+      Records.shiftEnded(150) and Records.shift == 150 and not Records.shiftEnded(120) and Records.shift == 150)
+    check('so is clearing more contracts than ever', Records.contractCleared(4, 12, 9) and Records.seed == 9
+      and not Records.contractCleared(4, 12, 10) and Records.seed == 9)
+    check('clearing the twelfth counts as a win', Records.contractCleared(12, 12, 11) and Records.wins == 1)
+  end
+
   -- 10f. Booster pads and premium faces in the simulation.
   do
     local layout = require 'tests.layout'

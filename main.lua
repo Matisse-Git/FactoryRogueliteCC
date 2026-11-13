@@ -26,3 +26,4 @@ function love.mousereleased(x, y, b) App.mousereleased(x, y, b) end
 function love.mousemoved(x, y) App.mousemoved(x, y) end
 function love.wheelmoved(dx, dy) App.wheelmoved(dx, dy) end
 function love.keypressed(key) App.keypressed(key) end
+function love.quit() App.quit() end

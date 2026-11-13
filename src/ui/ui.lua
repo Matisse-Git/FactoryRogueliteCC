@@ -3,6 +3,7 @@
 
 local P = require 'src.gfx.palette'
 local Font = require 'src.gfx.font'
+local Sfx = require 'src.sfx'
 
 local UI = {
   mx = -1, my = -1,   -- mouse position on the canvas
@@ -96,7 +97,9 @@ function UI.button(label, x, y, w, h, opts)
   UI.frame(x, y, w, h, opts.disabled and P.faint or accent)
   local tc = opts.disabled and P.faint or (opts.active and P.dark or P.text)
   UI.textCenter(label, x + w / 2, y + math.floor((h - 5) / 2), tc)
-  return not opts.disabled and UI.clicked(x, y, w, h)
+  local clicked = not opts.disabled and UI.clicked(x, y, w, h)
+  if clicked then Sfx.play('click') end
+  return clicked
 end
 
 -- Upgrade card icon: 16x16, accent border, two-letter code.

@@ -24,6 +24,7 @@ local function take(app, i)
   if not run:choose(i) then return end
   run:openShop()
   app.state = 'shop'
+  app.save()
 end
 
 -- The rows of a market: used here and in the game's intro panel.
@@ -121,6 +122,8 @@ local function drawReward(app)
     UI.paragraph(desc, x + 5, y + 26, 21, P.dim)
     if UI.button('TAKE ' .. i, x + 5, y + h - 17, w - 10, 13, { color = P.green }) then
       run:takeReward(i)
+      require('src.sfx').play('buy')
+      app.save()
       return
     end
   end
@@ -169,7 +172,7 @@ end
 function Board.key(app, key)
   local n = tonumber(key)
   if app.run.reward then
-    if n then app.run:takeReward(n) end
+    if n and app.run:takeReward(n) then app.save() end
   elseif n == 1 or n == 2 then
     take(app, n)
   end

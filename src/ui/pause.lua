@@ -1,14 +1,15 @@
 -- Pause menu: opens over a run (Esc, or the MENU button). The run waits
--- underneath. Abandoning takes two clicks, since a run cannot be resumed.
+-- underneath. SAVE AND QUIT leaves it to be continued from the title screen;
+-- abandoning ends it for good and takes two clicks.
 
 local P = require 'src.gfx.palette'
 local UI = require 'src.ui.ui'
 
 local Pause = {}
 
-local X, Y, W, H = 110, 46, 100, 88
+local X, Y, W, H = 110, 38, 100, 104
 local BX, BW, BH = X + 12, W - 24, 13
-local ROW = { resume = Y + 22, settings = Y + 38, abandon = Y + 54 }
+local ROW = { resume = Y + 22, settings = Y + 38, quit = Y + 54, abandon = Y + 70 }
 local armed = false          -- ABANDON RUN was clicked once
 
 function Pause.open()
@@ -25,9 +26,14 @@ function Pause.draw(app)
   UI.panel(X, Y, W, H, P.panel, P.line)
   UI.textCenter('PAUSED', X + W / 2, Y + 6, P.gold)
   UI.rect(X + 6, Y + 15, W - 12, 1, P.line)
+  UI.textCenter('SEED ' .. app.run.seed, X + W / 2, Y + H - 13, P.faint)
 
   if UI.button('RESUME', BX, ROW.resume, BW, BH, { color = P.green }) then app.closePause() end
   if UI.button('SETTINGS', BX, ROW.settings, BW, BH) then app.openSettings() end
+  if UI.button('SAVE AND QUIT', BX, ROW.quit, BW, BH) then
+    app.saveAndQuit()        -- the run is gone from here on: draw nothing more of it
+    return
+  end
 
   -- Moving off the button takes the question back.
   if armed and not UI.inside(BX, ROW.abandon, BW, BH) then armed = false end
@@ -35,8 +41,6 @@ function Pause.draw(app)
       { color = P.red, active = armed }) then
     if armed then app.abandonRun() else armed = true end
   end
-
-  UI.textCenter('SEED ' .. app.run.seed, X + W / 2, Y + H - 13, P.faint)
 end
 
 function Pause.press(app, x, y, b)
