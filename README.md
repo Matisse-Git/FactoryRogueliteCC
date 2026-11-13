@@ -4,7 +4,8 @@ Factorio-style throughput puzzles in a Balatro-style run. No exploration: one
 screen, a kit of machines, and a revenue quota to beat.
 
 Built with [LÖVE 11.5](https://love2d.org) and a small handwritten ECS.
-320×180 internal resolution, scaled by whole numbers.
+320×180 internal resolution, scaled by whole numbers and shown through a
+CRT filter (both adjustable in the settings, F10).
 
 ## Run it
 
@@ -27,6 +28,7 @@ lovec . --shots
 - `--test` runs the headless simulation tests.
 - `--bench` prints what reference layouts earn per shift, with and without each upgrade (for tuning quotas).
 - `--shots` drives the real game with mouse and keyboard events, checks the results, and saves screenshots to the LÖVE save directory.
+  The numbered shots are the bare canvas; the `*_crt_*` ones go through the CRT filter. It ignores your saved settings.
 
 ## How a run works
 
@@ -71,7 +73,20 @@ a smelter takes 4 s, a press 3 s, an assembler 6 s. The recipe book (Tab) has th
 | Space / Enter | Run the shift; during a shift, Space pauses |
 | 1 / 2 / 3 (during a shift) | Speed 1×, 2×, 4× |
 | Tab | Recipe book |
+| F10 | Settings (a running shift waits while they are open) |
 | F11 | Fullscreen |
+
+### Settings
+
+- **CRT filter**: one strength slider, 0 to 100 (click, drag, or Left / Right). 50 is the default:
+  scanlines, a soft glow, darker corners, a faint colour fringe near the edges and a slight bulge.
+  0 turns it off. Nothing in the filter moves or flickers. Scanlines fade out when the picture
+  is shown at less than 3×.
+- **Fullscreen**: same as F11.
+- **Integer scaling**: on, the picture is scaled by whole numbers with black bars around it.
+  Off, it fills the window as far as its 16:9 shape allows.
+
+Settings are saved to `settings.txt` in the LÖVE save directory.
 
 ## Where things live
 
@@ -81,11 +96,14 @@ src/ecs.lua            entities, component queries, systems
 src/sim/               the simulation (no graphics): factory, belts, machines
 src/rules.lua          hook dispatcher for upgrades and boss twists
 src/run.lua            run state: kit, credits, contracts, shop
+src/settings.lua       player settings and their file
 src/data/              ALL content and balance: items, recipes, machines,
                        upgrades, contracts (quotas, bosses, payouts)
-src/gfx/               palette, pixel font, sprites (authored as text)
-src/ui/                screens: title, game, shop, recipe book; fx.lua holds
-                       the upgrade feedback (card pops, tile flashes)
+src/gfx/               palette, pixel font, sprites (authored as text);
+                       crt.lua is the CRT filter and its mouse correction
+src/ui/                screens: title, game, shop, recipe book; settings.lua
+                       is the settings panel; fx.lua holds the upgrade
+                       feedback (card pops, tile flashes)
 tests/                 headless tests, ASCII layout loader, benchmark
 tools/shots.lua        scripted play-through with screenshots
 ```
@@ -119,4 +137,4 @@ with its own change in slot order, and the credits add up to the shift total.
 ## Status
 
 Prototype. Quotas are tuned for the first sector only; later sectors are a
-first guess. No audio, no saves, no meta-progression. Art is placeholder.
+first guess. No audio, no saved runs, no meta-progression. Art is placeholder.

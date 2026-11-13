@@ -26,7 +26,8 @@ function Title.draw(app)
   UI.textCenter('SEED ' .. app.seed, 160, 116, P.text)
   UI.textCenter('TYPE DIGITS TO CHANGE IT', 160, 125, P.faint)
   if UI.button('START RUN', 122, 138, 76, 15, { color = P.green }) then app.newRun() end
-  UI.textCenter('F11 FULLSCREEN   ESC QUIT', 160, 166, P.faint)
+  if UI.button('SETTINGS', 132, 155, 56, 11) then app.openSettings() end
+  UI.textCenter('F10 SETTINGS   F11 FULLSCREEN   ESC QUIT', 160, 171, P.faint)
 end
 
 function Title.press(app, x, y, b)

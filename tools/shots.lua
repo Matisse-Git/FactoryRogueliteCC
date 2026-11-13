@@ -2,13 +2,40 @@
 -- Drives the game through its screens with real mouse / keyboard events,
 -- checks the results, and saves 3x screenshots to the LÖVE save directory
 -- (printed on exit). Exit code 1 if any check fails.
+-- The numbered shots are the bare canvas; the *_crt_* ones go through the
+-- CRT filter. Saved settings are neither read nor written.
 
 return function(App)
   local Game = require 'src.ui.game'
   local Factory = require 'src.sim.factory'
+  local Settings = require 'src.settings'
+  local Panel = require 'src.ui.settings'
+  local Crt = require 'src.gfx.crt'
   local out = love.graphics.newCanvas(960, 540)
   out:setFilter('nearest', 'nearest')
   local failed = false
+
+  -- The picture as the player sees it (CRT filter, scaling) in a w x h window.
+  local function crtShot(name, w, h)
+    local big = love.graphics.newCanvas(w, h)
+    love.graphics.setCanvas(big)
+    love.graphics.clear(0, 0, 0, 1)
+    App.present(w, h)
+    love.graphics.setCanvas()
+    big:newImageData():encode('png', name .. '.png')
+    big:release()
+  end
+
+  -- Window position at which the filter draws a canvas point: the inverse of
+  -- Crt.warp, by iteration.
+  local function screenOf(px, py)
+    local s, ox, oy = App.layout()
+    local k = Crt.K * App.crt()
+    local dx, dy = px / App.W * 2 - 1, py / App.H * 2 - 1
+    local cx, cy = dx, dy
+    for _ = 1, 20 do cx, cy = dx / (1 + k * cy * cy), dy / (1 + k * cx * cx) end
+    return math.floor(ox + (cx + 1) / 2 * App.W * s), math.floor(oy + (cy + 1) / 2 * App.H * s)
+  end
 
   local function shot(name)
     love.graphics.setCanvas(out)
@@ -379,6 +406,97 @@ return function(App)
     shot('13_run_over')
     click(112, 130)
     expect('TITLE returns to the title screen', App.state == 'title')
+
+    ---------------------------------------------------------- settings panel
+    expect('crt: the filter is available', Crt.ok)
+    expect('settings: defaults', Settings.crt == 50 and Settings.integer)
+    click(160, 160)
+    expect('settings: the title button opens the panel', App.settingsOpen)
+    local seed = App.seed
+    App.keypressed('3')
+    expect('settings: keys do not reach the screen underneath', App.seed == seed)
+    App.move(300, 20)
+    wait(2)
+    shot('19_settings')
+
+    click(Panel.stop(100))
+    expect('slider: a click sets the strength', Settings.crt == 100)
+    local sx, sy = Panel.stop(100)
+    App.move(sx, sy)
+    App.press(sx, sy, 1)
+    App.move(Panel.stop(30), sy + 20)
+    wait(1)
+    App.release(Panel.stop(30), sy + 20, 1)
+    expect('slider: dragging follows the mouse', Settings.crt == 30)
+    App.move(Panel.stop(80), sy)
+    expect('slider: and stops on release', Settings.crt == 30)
+    App.keypressed('right')
+    expect('slider: arrow keys step by 10', Settings.crt == 40)
+    for _ = 1, 6 do App.keypressed('left') end
+    expect('slider: 0 turns the filter off', Settings.crt == 0 and App.crt() == 0)
+
+    expect('scaling: whole numbers by default', App.layout(1000, 700) == 3)
+    click(219, 104)
+    expect('scaling: the switch allows fractional sizes',
+      not Settings.integer and App.layout(1000, 700) == 3.125)
+    wait(2)
+    crtShot('22_fractional_scaling', 1000, 700)
+    click(219, 104)
+    expect('scaling: and switches back', Settings.integer and App.layout(1000, 700) == 3)
+
+    App.keypressed('escape')
+    expect('settings: Esc closes the panel, not the game', not App.settingsOpen and App.state == 'title')
+
+    ---------------------------------------------------------- CRT filter
+    App.seed = 4242
+    App.keypressed('return')
+    wait(2)
+    click(112, 142)
+    App.keypressed('x')
+    F = App.run.factory
+    Settings.set('crt', 100)
+    App.g.tool = 'belt'
+    -- The inner corner of cell (1, 0): drawn far enough from where an
+    -- unfiltered picture has it that an uncorrected mouse hits cell (2, 1).
+    local wx, wy = screenOf(31.5, 35.5)
+    local s, ox, oy = App.layout()
+    local nx, ny = math.floor((wx - ox) / s / 16), math.floor(((wy - oy) / s - 20) / 16)
+    expect('bulge: the picture really moves at this spot', nx == 2 and ny == 1)
+    App.mousemoved(wx, wy)
+    App.mousepressed(wx, wy, 1)
+    wait(1)
+    App.mousereleased(wx, wy, 1)
+    wait(1)
+    expect('bulge: a corner click lands on the tile under the cursor',
+      F:at(1, 0) and F:at(1, 0).belt and F:at(2, 1) == nil)
+    App.g.tool = nil
+    App.keypressed('x')
+
+    autoBuild()
+    Game.startShift(App)
+    App.g.acc = 30.4
+    wait(3)
+    App.keypressed('f10')
+    expect('settings: F10 opens the panel during a shift', App.settingsOpen)
+    local acc = App.g.acc
+    wait(10)
+    expect('settings: the shift waits while the panel is open', App.g.acc == acc)
+    App.move(300, 20)
+    wait(2)
+    crtShot('23_crt_settings_100', 1280, 720)
+    App.keypressed('f10')
+    wait(3)
+    expect('settings: closing it resumes the shift', not App.settingsOpen and App.g.acc ~= acc)
+
+    App.g.paused = true
+    App.move(cellXY(3, F.world:query('port')[1].pos.y))
+    wait(2)
+    crtShot('21_crt_100', 1280, 720)
+    Settings.set('crt', 50)
+    wait(2)
+    crtShot('20_crt_50', 1280, 720)
+    App.g.paused = false
+    Game.fastForward(App)
 
     print('screenshots saved to ' .. love.filesystem.getSaveDirectory())
   end)
