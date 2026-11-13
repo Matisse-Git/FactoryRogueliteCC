@@ -3,9 +3,21 @@
 
 local Contracts = {}
 
--- Revenue quota per contract (summed over the contract's shifts).
--- Untuned beyond the first sector: `lovec . --bench` prints reference numbers.
-Contracts.quotas = { 120, 220, 340, 550, 850, 1200, 1800, 2600, 3600 }
+-- Revenue quota per contract (summed over the contract's shifts): 12
+-- contracts from $120 to $5M, about x2.63 each. After the last one the run
+-- goes on in endless mode at x2.6 per contract.
+Contracts.quotas = {
+  120, 300, 800, 2200, 5800, 15000, 40000, 105000, 275000, 720000, 1900000, 5000000,
+}
+Contracts.endlessGrowth = 2.6
+
+function Contracts.quota(index)
+  local n = #Contracts.quotas
+  if index <= n then return Contracts.quotas[index] end
+  local q = Contracts.quotas[n] * Contracts.endlessGrowth ^ (index - n)
+  local mag = 10 ^ (math.floor(math.log10(q)) - 1)      -- two significant digits
+  return math.floor(q / mag + 0.5) * mag
+end
 
 Contracts.perSector = 3
 Contracts.shifts = 3        -- shifts per contract
@@ -29,8 +41,13 @@ Contracts.land = {
 Contracts.specials = { 'pad', 'node', 'rich', 'premium' }
 Contracts.specialChance = 60   -- percent of new plots that carry one
 
--- Payout in credits.
-Contracts.reward = { normal = 5, boss = 8, perUnusedShift = 2, interestPer = 5, interestCap = 5 }
+-- Payout in credits. Overshoot: beating the quota by each factor pays extra,
+-- so optimising past "good enough" is worth something.
+Contracts.reward = {
+  normal = 5, boss = 8, perUnusedShift = 2, interestPer = 5, interestCap = 5,
+  overshoot = { { 2, 2 }, { 4, 2 }, { 8, 2 } },     -- { times the quota, credits }
+  perStretch = 2,     -- a contract whose demand needs a machine you lack pays this much more
+}
 Contracts.startCredits = 4
 Contracts.startBlueprints = { 'smelter', 'press' }
 Contracts.upgradeSlots = 5

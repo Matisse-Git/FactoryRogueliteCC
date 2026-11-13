@@ -7,6 +7,7 @@
 local P = require 'src.gfx.palette'
 local Font = require 'src.gfx.font'
 local UI = require 'src.ui.ui'
+local Fmt = require 'src.fmt'
 
 local Fx = {
   POP = 0.25,     -- seconds a card stays popped after a trigger
@@ -77,7 +78,7 @@ end
 
 function Fx.money(delta)
   local n = math.floor(math.abs(delta) + 0.5)
-  return (delta < 0 and '-$' or '+$') .. n
+  return (delta < 0 and '-$' or '+$') .. Fmt.num(n)
 end
 
 -- Ledger wording for { delta, n }: money if the mod moved any, else how often

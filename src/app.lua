@@ -18,6 +18,7 @@ local screens = {
   title = require 'src.ui.title',
   game = require 'src.ui.game',
   shop = require 'src.ui.shop',
+  board = require 'src.ui.board',
 }
 
 local overlays = { pause = Pause, settings = Panel }

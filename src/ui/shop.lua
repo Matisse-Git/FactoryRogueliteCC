@@ -7,6 +7,8 @@ local UI = require 'src.ui.ui'
 local Machines = require 'src.data.machines'
 local Upgrades = require 'src.data.upgrades'
 local Contracts = require 'src.data.contracts'
+local Items = require 'src.data.items'
+local Fmt = require 'src.fmt'
 
 local Shop = {}
 
@@ -27,8 +29,13 @@ function Shop.draw(app)
   if UI.button('MENU', 146, 6, 27, 9) then app.openPause() end
   local p = run.lastPayout
   if p then
-    UI.text('PAYOUT  CONTRACT +$' .. p.base .. '   UNUSED SHIFTS +$' .. p.unused ..
-      '   INTEREST +$' .. p.interest, 8, 21, P.dim)
+    -- Only the parts that paid.
+    local parts = { 'CONTRACT ' .. p.base }
+    if p.unused > 0 then parts[#parts + 1] = 'SHIFTS LEFT ' .. p.unused end
+    if p.interest > 0 then parts[#parts + 1] = 'INTEREST ' .. p.interest end
+    if p.overshoot > 0 then parts[#parts + 1] = Fmt.dec(math.floor(p.times * 10) / 10) .. 'X QUOTA ' .. p.overshoot end
+    if p.stretch > 0 then parts[#parts + 1] = 'HARD MARKET ' .. p.stretch end
+    UI.text('PAID $' .. p.total .. ':  ' .. table.concat(parts, ' + '), 8, 21, P.dim)
   end
 
   -- Offers.
@@ -112,6 +119,33 @@ function Shop.draw(app)
     end
   end
 
+  -- What comes next: the contract you chose, and what it wants.
+  local nc = run:contract(run.index + 1)
+  local nextLabel = 'NEXT: ' .. Fmt.money(nc.quota)
+  UI.text(nextLabel, 8, 168, P.dim)
+  local nx = 8 + Font.width(nextLabel) + 6
+  local chosen = run.chosen or (run.offers and run.offers[1])
+  if chosen then
+    for _, d in ipairs(chosen.market.demand) do
+      UI.sprite(Sprites.item[d.item], nx, 166)
+      UI.text('X' .. d.mult, nx + 10, 168, P.green)
+      if UI.inside(nx, 165, 22, 10) then
+        info = { title = Items[d.item].name, color = P.green,
+          text = 'IN DEMAND NEXT CONTRACT: X' .. d.mult .. ' ON THE FIRST ' .. d.units .. ' SOLD EACH SHIFT.' }
+      end
+      nx = nx + 24
+    end
+    if chosen.market.slump then
+      local s = chosen.market.slump
+      UI.sprite(Sprites.item[s.item], nx, 166)
+      UI.text('X' .. Fmt.dec(s.mult), nx + 10, 168, P.red)
+      if UI.inside(nx, 165, 28, 10) then
+        info = { title = Items[s.item].name, color = P.red, text = 'SLUMPS NEXT CONTRACT: SELLS FOR X' .. Fmt.dec(s.mult) .. '.' }
+      end
+      nx = nx + 30
+    end
+  end
+  if nc.boss then UI.text('BOSS: ' .. nc.boss.name, nx, 168, P.red) end
   -- Info box.
   UI.panel(8, 140, 304, 22, P.panel, P.faint)
   if info then
@@ -121,16 +155,6 @@ function Shop.draw(app)
     UI.text('HOVER AN OFFER FOR DETAILS. CREDITS YOU KEEP EARN INTEREST: $1 PER $5, UP TO $5.', 12, 143, P.faint)
   end
 
-  -- What comes next.
-  local nc = run:contract(run.index + 1)
-  local nextLabel = 'NEXT: CONTRACT ' .. nc.index .. ', QUOTA $' .. nc.quota
-  UI.text(nextLabel, 8, 168, P.dim)
-  local nx = 8 + Font.width(nextLabel) + 8
-  if nc.boss then
-    UI.text('BOSS: ' .. nc.boss.name, nx, 168, P.red)
-  elseif nc.newSector then
-    UI.text('NEW SECTOR', nx, 168, P.cyan)
-  end
   if UI.button('NEXT CONTRACT', 232, 165, 80, 13, { color = P.green }) then leave(app) end
 end
 

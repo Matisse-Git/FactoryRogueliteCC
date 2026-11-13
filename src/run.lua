@@ -1,8 +1,12 @@
 -- One run: the site and its factory, blueprints, upgrades, credits and
 -- contract progress.
+--
+-- Between contracts: payout -> choose one of two offers (land + market) ->
+-- shop -> advance -> place the land -> build.
 
 local Factory = require 'src.sim.factory'
 local Map = require 'src.map'
+local Market = require 'src.market'
 local Rules = require 'src.rules'
 local Rng = require 'src.rng'
 local Machines = require 'src.data.machines'
@@ -17,6 +21,7 @@ function Run.new(seed)
   r.seed = seed
   r.layoutRng = Rng.new(seed * 7 + 1)
   r.shopRng = Rng.new(seed * 13 + 5)
+  r.marketRng = Rng.new(seed * 17 + 3)
   r.credits = Contracts.startCredits
   r.blueprints = {}          -- machine kinds unlocked for the run
   for _, kind in ipairs(Contracts.startBlueprints) do r.blueprints[kind] = true end
@@ -26,6 +31,7 @@ function Run.new(seed)
   r.index = 1                -- current contract
   r.progress = 0             -- revenue banked on the current contract
   r.shiftsUsed = 0
+  r.soldValue = {}           -- item -> revenue on the current contract
   r.won, r.lost = false, false
   r.shop = nil
 
@@ -44,6 +50,10 @@ function Run.new(seed)
   r.bosses = {}
   for s = 1, math.ceil(#Contracts.quotas / Contracts.perSector) do r.bosses[s] = pool[s] end
 
+  -- The first contract has no choice: a market the starting kit can fill.
+  r.market = Market.roll(r.marketRng, {
+    resources = r:resources(), owned = r:kinds(), sector = 1, easy = true,
+  })
   r:startContract()
   return r
 end
@@ -58,7 +68,7 @@ function Run:contract(index)
   return {
     index = index, sector = sector, isBoss = isBoss,
     boss = isBoss and self.bosses[sector] or nil,
-    quota = Contracts.quotas[index],
+    quota = Contracts.quota(index),
     newSector = index % per == 1,
   }
 end
@@ -68,11 +78,12 @@ function Run:basePower()
   return self.power + self.map:nodes() * Map.NODE_WATTS
 end
 
--- Active rule set: the site's own rules, upgrades left to right, then the
--- boss twist.
+-- Active rule set, in the order the rules apply to a sale: the site's own
+-- rules, the market, upgrades left to right, then the boss twist.
 function Run:refreshRules()
   local mods = {}
   if self.map.premium > 0 then mods[#mods + 1] = Contracts.premium end
+  if self.market then mods[#mods + 1] = Market.mod(self.market) end
   for _, id in ipairs(self.upgrades) do mods[#mods + 1] = Upgrades.byId[id] end
   local c = self:contract()
   if c.boss then mods[#mods + 1] = c.boss end
@@ -87,7 +98,25 @@ function Run:canBuild(x, y)
   return self.map:owned(x, y)
 end
 
--- The plot offered for a contract in this sector.
+-- The raw items the site's ports supply, as a set. `plot` adds a plot that
+-- is on offer.
+function Run:resources(plot)
+  local set = {}
+  for _, e in ipairs(self.factory.world:query('port')) do set[e.port.item] = true end
+  for _, p in ipairs(plot and plot.ports or {}) do set[p.item] = true end
+  return set
+end
+
+-- The machine kinds the run can build, as a set.
+function Run:kinds()
+  local set = {}
+  for _, kind in ipairs(Machines.list) do
+    if self:unlocked(kind) then set[kind] = true end
+  end
+  return set
+end
+
+-- A plot for a contract in this sector.
 function Run:rollPlot(sector)
   local rng = self.layoutRng
   local land = Contracts.land[math.min(sector, #Contracts.land)]
@@ -137,13 +166,56 @@ end
 function Run:startContract()
   self.progress = 0
   self.shiftsUsed = 0
+  self.soldValue = {}
   local c = self:contract()
   self:clearRubble()
-  -- Every contract after the first comes with new land, while there is room.
-  self.pendingPlot = nil
-  if c.index > 1 and #self.map:free() > 0 then self.pendingPlot = self:rollPlot(c.sector) end
   if c.boss and c.boss.rubble then self:placeRubble(c.boss.rubble) end
   self:refreshRules()
+end
+
+---------------------------------------------------------------- offers
+
+-- The two contracts on offer after the current one: each a plot (while the
+-- site has room) and a market. Seen before the shop, so it can be shopped for.
+function Run:rollOffers()
+  local c = self:contract(self.index + 1)
+  local room = #self.map:free() > 0
+  local owned = self:kinds()
+  local offers = {}
+  for i = 1, 2 do
+    local plot = room and self:rollPlot(c.sector) or nil
+    local resources = self:resources(plot)
+    -- From the second sector on something slumps: on one offer the product
+    -- you sold most of, on the other any product you can make.
+    local slump
+    if c.sector >= 2 then slump = (i == 1 and self:topSeller()) or 'random' end
+    local market = Market.roll(self.marketRng, {
+      resources = resources, owned = owned, sector = c.sector, slump = slump,
+    })
+    local stretch = 0
+    for _, d in ipairs(market.demand) do
+      local missing = Market.missing(d.item, resources, owned)
+      if missing and #missing > 0 then stretch = stretch + 1 end
+    end
+    offers[i] = { plot = plot, market = market, bonus = stretch * Contracts.reward.perStretch }
+  end
+  self.offers, self.chosen = offers, nil
+  return offers
+end
+
+function Run:choose(i)
+  if not self.offers or not self.offers[i] then return false end
+  self.chosen = self.offers[i]
+  return true
+end
+
+-- The item that earned the most on the current contract, or nil.
+function Run:topSeller()
+  local best, top
+  for item, value in pairs(self.soldValue) do
+    if not best or value > best or (value == best and item < top) then best, top = value, item end
+  end
+  return top
 end
 
 ---------------------------------------------------------------- blueprints
@@ -178,6 +250,9 @@ end
 function Run:endShift()
   local s = self.factory:endShift()
   self.progress = self.progress + s.total
+  for item, rec in pairs(s.sold) do
+    self.soldValue[item] = (self.soldValue[item] or 0) + rec.total
+  end
   local quota = self:contract().quota
   if self.progress >= quota then
     s.status = 'cleared'
@@ -198,20 +273,30 @@ function Run:payout()
     base = c.isBoss and R.boss or R.normal,
     unused = self:shiftsLeft() * R.perUnusedShift,
     interest = math.min(R.interestCap, math.floor(self.credits / R.interestPer)),
+    stretch = self.bonus or 0,
+    overshoot = 0,
+    times = self.progress / c.quota,
   }
-  p.total = p.base + p.unused + p.interest
+  for _, step in ipairs(R.overshoot) do
+    if p.times >= step[1] then p.overshoot = p.overshoot + step[2] end
+  end
+  p.total = p.base + p.unused + p.interest + p.stretch + p.overshoot
   self.credits = self.credits + p.total
   self.lastPayout = p
   return p
 end
 
--- Move on after the shop. Sets self.won after the last contract.
+-- Move on to the chosen contract, after the shop. Its land still has to be
+-- placed (see Run:annex).
 function Run:advance()
-  if self.index >= self:total() then
-    self.won = true
-    return
-  end
+  local offer = self.chosen or (self.offers and self.offers[1])
   self.index = self.index + 1
+  if offer then
+    self.market = offer.market
+    self.pendingPlot = offer.plot
+    self.bonus = offer.bonus
+  end
+  self.offers, self.chosen = nil, nil
   self:startContract()
 end
 
@@ -224,7 +309,9 @@ function Run:rollShop()
   local pool = {}
   for _, kind in ipairs(Machines.list) do
     local def = Machines[kind]
-    if def.cost and not self.blueprints[kind] then pool[#pool + 1] = { kind, def.weight or 1 } end
+    if def.cost and not self.blueprints[kind] and (not def.needs or self.blueprints[def.needs]) then
+      pool[#pool + 1] = { kind, def.weight or 1 }
+    end
   end
   for _ = 1, math.min(2, #pool) do
     local kind = rng:weighted(pool)

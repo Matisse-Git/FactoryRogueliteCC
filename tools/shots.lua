@@ -12,6 +12,7 @@ return function(App)
   local Settings = require 'src.settings'
   local Panel = require 'src.ui.settings'
   local Pause = require 'src.ui.pause'
+  local Board = require 'src.ui.board'
   local Crt = require 'src.gfx.crt'
   local Contracts = require 'src.data.contracts'
   local Upgrades = require 'src.data.upgrades'
@@ -356,7 +357,13 @@ return function(App)
     wait(1)
     expect('banked revenue clears the contract', App.g.mode == 'summary' and App.g.summary.status == 'cleared')
     click(Game.at.summary)
-    expect('COLLECT opens the shop', App.state == 'shop' and App.run.credits > 4)
+    expect('COLLECT opens the contract board', App.state == 'board' and #App.run.offers == 2 and App.run.credits > 4)
+    App.move(160, 100)
+    wait(2)
+    shot('05c_board')
+    click(Board.at(2))
+    expect('board: TAKE picks that contract and opens the shop',
+      App.state == 'shop' and App.run.chosen == App.run.offers[2])
     click(159, 10)
     expect('shop: MENU opens the pause menu', App.overlay == 'pause')
     App.keypressed('escape')
@@ -406,6 +413,7 @@ return function(App)
     expect('land: clicking your own plot does nothing', App.g.mode == 'annex')
     local ports = #f.world:query('port')
     local plot = App.run.pendingPlot
+    expect('land: it is the plot of the contract you took', plot ~= nil and App.run.market ~= nil)
     click(cell(free[2][1] * Map.PW + 4, free[2][2] * Map.PH + 3))
     expect('land: clicking a free slot places it',
       App.g.mode == 'intro' and App.run.map.count == 2 and App.run.map:has(free[2][1], free[2][2]))
@@ -468,7 +476,7 @@ return function(App)
     ---------------------------------------------------------- upgrade feedback
     -- Build mode: machines changed by a static modifier carry pips.
     Game.afterSummary(App)
-    if App.state == 'shop' then          -- the late layout may clear the contract
+    if App.state ~= 'game' then          -- the late layout may clear the contract
       App.state = 'game'
       App.g.mode = 'build'
     end

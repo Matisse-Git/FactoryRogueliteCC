@@ -11,6 +11,10 @@ local Sprites = require 'src.gfx.sprites'
 local UI = require 'src.ui.ui'
 local Fx = require 'src.ui.fx'
 local Book = require 'src.ui.book'
+local Fmt = require 'src.fmt'
+local Land = require 'src.ui.land'
+local Board = require 'src.ui.board'
+local Market = require 'src.market'
 local Factory = require 'src.sim.factory'
 local Map = require 'src.map'
 local D = require 'src.sim.dirs'
@@ -399,8 +403,9 @@ local function afterSummary(app)
       run.won = true
       g.mode = 'win'
     else
-      run:openShop()
-      app.state = 'shop'
+      -- Choose the next contract first, then shop for it.
+      run:rollOffers()
+      app.state = 'board'
     end
   else
     g.mode = 'over'
@@ -529,17 +534,9 @@ end
 
 -- A plot's fixed pieces, drawn at plot slot (sx, sy): the preview of land
 -- that is on offer.
-local function drawPlot(g, S, T, plot, sx, sy, alpha)
+local function drawPlot(g, T, plot, sx, sy, alpha)
   local ox, oy = tilePos(g, sx * Map.PW, sy * Map.PH)
-  for y = 0, Map.PH - 1 do
-    for x = 0, Map.PW - 1 do UI.sprite(S.floor, ox + x * T, oy + y * T, 0, alpha) end
-  end
-  for _, p in ipairs(plot.pads or {}) do UI.sprite(S.pad, ox + p.x * T, oy + p.y * T, 0, alpha) end
-  for _, r in ipairs(plot.rocks) do UI.sprite(S.machine.rock, ox + r.x * T, oy + r.y * T, 0, alpha) end
-  if plot.node then UI.sprite(S.machine.node, ox + plot.node.x * T, oy + plot.node.y * T, 0, alpha) end
-  for _, p in ipairs(plot.ports) do
-    drawPiece(S, T, { kind = 'port', dir = p.dir }, ox + p.x * T, oy + p.y * T, alpha, p.item, true)
-  end
+  Land.draw(plot, ox, oy, T, alpha)
 end
 
 local function drawBoard(app)
@@ -704,7 +701,7 @@ local function drawBoard(app)
       local px, py = tilePos(g, s[1] * Map.PW, s[2] * Map.PH)
       local w, h = Map.PW * T, Map.PH * T
       if s[1] == hsx and s[2] == hsy then
-        drawPlot(g, S, T, plot, s[1], s[2], 1)
+        drawPlot(g, T, plot, s[1], s[2], 1)
         UI.frame(px, py, w, h, P.white)
       else
         UI.rect(px + 1, py + 1, w - 2, h - 2, P.cyanD, 0.25)
@@ -753,7 +750,7 @@ local function drawBoard(app)
   -- Sale popups: red when the sale was zeroed, the colour of the mod that
   -- added the most when one did, green for a plain sale.
   for _, p in ipairs(g.popups) do
-    local label, color = '+$' .. p.value, p.color or P.green
+    local label, color = '+$' .. Fmt.num(p.value), p.color or P.green
     if p.value == 0 then label, color = '$0', P.red end
     local px, py = tilePos(g, p.x, p.y)
     local x = px + T / 2 - Font.width(label) / 2
@@ -808,7 +805,7 @@ local function drawTopBar(app)
   UI.rect(3, 9, bw, 5, P.bg)
   UI.rect(3, 9, floor(bw * min(1, earned / c.quota)), 5, earned >= c.quota and P.green or P.gold)
   UI.frame(3, 9, bw, 5, P.line)
-  UI.text('$' .. earned .. '/' .. c.quota, 3 + bw + 4, 9, earned >= c.quota and P.green or P.text)
+  UI.text(Fmt.money(earned) .. '/' .. Fmt.num(c.quota), 3 + bw + 4, 9, earned >= c.quota and P.green or P.text)
 
   local tick = live and F.shift.tick or 0
   UI.textRight(tick .. '/' .. rules.shiftLen .. 'S', 316, 9, g.mode == 'run' and P.text or P.dim)
@@ -818,7 +815,8 @@ local function drawTopBar(app)
   -- What the factory is earning per second, as measured so far.
   if live and tick > 0 then
     local rate = F.shift.revenue / tick
-    UI.textRight('$' .. num(floor(rate * 10 + 0.5) / 10) .. '/S', 240, 9, P.gold)
+    local label = rate < 100 and ('$' .. num(floor(rate * 10 + 0.5) / 10)) or Fmt.money(rate)
+    UI.textRight(label .. '/S', 240, 9, P.gold)
   end
 end
 
@@ -842,8 +840,9 @@ local function ledgerRows(app)
     local rec = ledger[mod]
     if not rec then return end
     local held = hidden[mod]
-    rows[#rows + 1] = { mod = mod, delta = rec.delta - (held or 0), n = rec.n - (held and 1 or 0) }
+    rows[#rows + 1] = { mod = mod, delta = rec.delta - (held or 0), n = rec.n - (held and 1 or 0), i = #rows + 1 }
   end
+  if run.market then add(Market.mod(run.market)) end
   for _, id in ipairs(run.upgrades) do add(Upgrades.byId[id]) end
   add(Contracts.premium)
   local boss = run:contract().boss
@@ -853,8 +852,7 @@ end
 
 local HINTS = {
   annex = { 'CLICK A FREE', 'PLOT TO PLACE', 'YOUR NEW LAND.' },
-  build = { 'LMB PLACE', 'RMB REMOVE', 'R   ROTATE', 'V   SELECT', 'F   FILTER', 'WHEEL ZOOM', 'WASD MOVE',
-    'TAB RECIPES', 'U   BUSY %' },
+  build = { 'R   ROTATE', 'V   SELECT', 'F   FILTER', 'TAB RECIPES', 'U   BUSY %', 'WHEEL ZOOM', 'WASD MOVE' },
   select = { 'DRAG A BOX', 'C   COPY', 'X   CUT', 'DEL REMOVE', 'Q   CANCEL' },
   stamp = { 'LMB PASTE', 'R   ROTATE', 'Q   DONE' },
   run = { 'SPACE PAUSE', '1 2 3 SPEED', 'HOVER A', 'MACHINE TO', 'SEE HOW BUSY', 'IT IS.' },
@@ -906,9 +904,54 @@ local function drawSidebar(app)
     end
   end
 
+  -- The market: what is in demand this contract, and how much of each
+  -- demand this shift has filled.
+  local y = 75
+  local market = run.market
+  if market then
+    UI.text('MARKET', x0, y, P.dim)
+    y = y + 8
+    for _, d in ipairs(market.demand) do
+      local filled = live and min(d.units, Market.filled(rules, d.item)) or 0
+      UI.sprite(Sprites.item[d.item], x0, y - 1)
+      UI.text('X' .. d.mult, x0 + 10, y + 1, P.green)
+      UI.textRight(live and (filled .. '/' .. d.units) or tostring(d.units), SX + SW - 3, y + 1,
+        filled >= d.units and P.green or (live and P.text or P.dim))
+      if UI.inside(SX, y - 1, SW, 9) then
+        local def = Items[d.item]
+        local tip = { title = def.name .. ' IN DEMAND', color = P.green, lines = {
+          'SELLS FOR X' .. d.mult .. ': ' .. Fmt.money(def.value * d.mult) .. ' INSTEAD OF ' .. Fmt.money(def.value) .. '.',
+          'ON THE FIRST ' .. d.units .. ' SOLD EACH SHIFT. AFTER THAT, THE NORMAL PRICE.' } }
+        local missing = Market.missing(d.item, run:resources(), run:kinds())
+        if missing == nil then
+          tip.lines[3] = 'NOTHING ON YOUR SITE MAKES IT.'
+        elseif #missing > 0 then
+          local names = {}
+          for i, kind in ipairs(missing) do names[i] = Machines[kind].name end
+          tip.lines[3] = 'NEEDS: ' .. table.concat(names, ', ') .. '.'
+        end
+        UI.tip = tip
+      end
+      y = y + 9
+    end
+    if market.slump then
+      local s = market.slump
+      UI.sprite(Sprites.item[s.item], x0, y - 1)
+      UI.text('X' .. num(s.mult), x0 + 10, y + 1, P.red)
+      UI.textRight('SLUMP', SX + SW - 3, y + 1, P.red)
+      if UI.inside(SX, y - 1, SW, 9) then
+        local def = Items[s.item]
+        UI.tip = { title = def.name .. ' SLUMP', color = P.red, lines = {
+          'SELLS FOR X' .. num(s.mult) .. ' THIS CONTRACT: ' .. Fmt.money(def.value * s.mult) ..
+          ' INSTEAD OF ' .. Fmt.money(def.value) .. '.' } }
+      end
+      y = y + 9
+    end
+    y = y + 2
+  end
+
   -- During a shift: the ledger. Otherwise: the keys that matter right now.
   local rows = live and ledgerRows(app)
-  local y = 78
   if g.mode == 'annex' then
     UI.text('NEW LAND', x0, y, P.cyan)
     y = y + 8
@@ -918,7 +961,14 @@ local function drawSidebar(app)
     y = y + 3
   end
   if rows then
+    -- What fits, the rows that did something first.
+    table.sort(rows, function(a, b)
+      local ta, tb = a.n > 0, b.n > 0
+      if ta ~= tb then return ta end
+      return a.i < b.i
+    end)
     for _, row in ipairs(rows) do
+      if y > 154 then break end
       local amount, color = Fx.amount(row)
       local name = Fx.fit(row.mod.name, w - Font.width(amount) - 3)
       UI.text(name, x0, y, row.n > 0 and Fx.color(row.mod) or P.faint)
@@ -930,6 +980,7 @@ local function drawSidebar(app)
     if g.mode == 'build' and (g.tool == 'select' or g.sel) then hints = HINTS.select end
     if g.mode == 'build' and g.tool == 'stamp' then hints = HINTS.stamp end
     for _, line in ipairs(hints or {}) do
+      if y > 154 then break end
       UI.text(line, x0, y, P.faint)
       y = y + 7
     end
@@ -1047,20 +1098,25 @@ local function drawIntro(app)
   local g, run = app.g, app.run
   local c, rules = run:contract(), run.rules
   dim()
-  local w, h = 188, 108
-  local x, y = floor(CX - w / 2), 34
+  local w, h = 200, 132
+  local x, y = floor(CX - w / 2), 22
   local cx = x + w / 2
   UI.panel(x, y, w, h, P.panel, c.boss and P.red or P.line)
-  UI.textCenter('CONTRACT ' .. c.index .. ' OF ' .. run:total(), cx, y + 6, P.dim)
-  UI.textCenter('QUOTA $' .. c.quota, cx, y + 15, P.gold, 2)
-  UI.textCenter(rules.shifts .. ' SHIFTS OF ' .. rules.shiftLen .. ' SECONDS', cx, y + 30, P.text)
-  local yy = y + 42
+  UI.textCenter('CONTRACT ' .. c.index .. (c.index <= run:total() and (' OF ' .. run:total()) or ''), cx, y + 5, P.dim)
+  UI.textCenter('QUOTA ' .. Fmt.money(c.quota), cx, y + 13, P.gold, 2)
+  UI.textCenter(rules.shifts .. ' SHIFTS OF ' .. rules.shiftLen .. ' SECONDS', cx, y + 27, P.text)
+  local yy = y + 37
   if c.index == 1 then
-    for _, line in ipairs(Font.wrap('LAY BELTS FROM THE PORTS TO THE DEPOT IN THE MIDDLE. '
-        .. 'MACHINES ON THE WAY ADD VALUE. BUILD AS MANY AS YOUR POWER ALLOWS.', 42)) do
+    for _, line in ipairs(Font.wrap('LAY BELTS FROM THE PORTS TO THE DEPOT. MACHINES ON THE WAY ADD VALUE: '
+        .. 'BUILD AS MANY AS YOUR POWER ALLOWS.', 46)) do
       UI.textCenter(line, cx, yy, P.dim)
       yy = yy + 7
     end
+    yy = yy + 2
+  end
+  if run.market then
+    UI.text('IN DEMAND', x + 8, yy, P.green)
+    yy = Board.marketRows(run, run.market, nil, x + 8, yy + 8, w - 16) + 2
   end
   if c.boss then
     UI.textCenter('BOSS: ' .. c.boss.name, cx, yy, P.red)
@@ -1097,7 +1153,7 @@ local function drawSummary(app)
     UI.sprite(Sprites.item[t], x + 8, yy - 1)
     UI.text(Items[t].name, x + 20, yy + 1, P.dim)
     UI.textRight('X' .. rec.n, x + 130, yy + 1, P.text)
-    UI.textRight('$' .. rec.total, x + w - 8, yy + 1, P.text)
+    UI.textRight(Fmt.money(rec.total), x + w - 8, yy + 1, P.text)
     yy = yy + 9
   end
   if #order > shown then
@@ -1136,13 +1192,13 @@ local function drawSummary(app)
     yy = yy + 8
   end
   UI.text('SHIFT TOTAL', x + 8, yy, P.text)
-  UI.textRight('$' .. revealedTotal(g), x + w - 8, yy, P.gold)
+  UI.textRight(Fmt.money(revealedTotal(g)), x + w - 8, yy, P.gold)
   if not revealDone(g) then return end
 
   yy = yy + 9
   local met = run.progress >= c.quota
   UI.text('CONTRACT', x + 8, yy, P.dim)
-  UI.textRight('$' .. run.progress .. ' / $' .. c.quota, x + w - 8, yy, met and P.green or P.text)
+  UI.textRight(Fmt.money(run.progress) .. ' / ' .. Fmt.money(c.quota), x + w - 8, yy, met and P.green or P.text)
 
   local by = y + h - 18
   local label, msg, color = 'NEXT SHIFT', run:shiftsLeft() .. ' SHIFTS LEFT', P.text
@@ -1167,7 +1223,7 @@ local function drawEnd(app, won)
   else
     UI.textCenter('RUN OVER', cx, y + 10, P.red, 2)
     UI.textCenter('STOPPED AT CONTRACT ' .. run.index .. ' OF ' .. run:total(), cx, y + 28, P.text)
-    UI.textCenter('$' .. run.progress .. ' OF $' .. run:contract().quota, cx, y + 37, P.dim)
+    UI.textCenter(Fmt.money(run.progress) .. ' OF ' .. Fmt.money(run:contract().quota), cx, y + 37, P.dim)
   end
   UI.textCenter('SEED ' .. run.seed, cx, y + 48, P.faint)
   if UI.button('TITLE', cx - 30, y + h - 19, 60, 13, { color = P.green }) then app.toTitle() end
@@ -1389,7 +1445,7 @@ Game.at = {
   run = { SX + 25, 170 }, book = { SX + 55, 170 },
   speed = { { SX + 12, 170 }, { SX + 32, 170 }, { SX + 52, 170 } },
   menu = { 304, 4 },
-  intro = { CX, 131 },          -- START
+  intro = { CX, 143 },          -- START
   summary = { CX + 57, 146 },   -- NEXT SHIFT / COLLECT / END RUN
   finish = { CX, 118 },         -- TITLE on the end screen
 }

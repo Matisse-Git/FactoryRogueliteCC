@@ -162,7 +162,10 @@ new land every contract, a camera with two zoom levels (wheel or Z, WASD or
 middle-drag to move), and select / copy / cut / paste (V, then C, X, Delete);
 ten production machines, 37 items in five tiers where every step is worth about
 2.7x what went in, a filter (F sets its item), a tar byproduct that generators
-burn, and crates.
-Quotas are not yet retuned for any of it, and the rest of this file still
+burn, and crates; 12 contracts from $120 to $5M, each with a market (products in
+demand pay x3 on a limited number of units per shift, one product may slump),
+a choice between two contracts before every shop, and credits for beating the
+quota by 2x, 4x and 8x.
+The quota curve is a first pass, and the rest of this file still
 describes the single-board prototype in places. No audio, no saved runs. Art is
 placeholder.
