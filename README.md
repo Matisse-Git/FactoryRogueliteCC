@@ -2,7 +2,7 @@
 
 Factorio-style throughput puzzles in a Balatro-style run. No exploration: one
 site, a factory you keep building for the whole run, and a revenue quota that
-grows from $120 to $5,000,000.
+grows from $120 to $2,200,000, and past it in endless mode.
 
 Built with [LÖVE 11.5](https://love2d.org) and a small handwritten ECS.
 320×180 internal resolution, scaled by whole numbers and shown through a
@@ -98,7 +98,8 @@ lovec . --shots
 
 ### The shop
 
-Clearing a contract pays **credits**: 5 (8 for a boss), 2 per unused shift, interest on what you
+Clearing a contract pays **credits**: 5, plus 3 for every sector after the first and 3 for a boss,
+2 per unused shift, interest on what you
 kept ($1 per $5, up to $5), 2 for each of 2×, 4× and 8× the quota, and 2 for a hard market. The
 shop offers six things, and one reroll replaces all six:
 
@@ -107,9 +108,10 @@ shop offers six things, and one reroll replaces all six:
 - **Two modules**, the rule-benders: 40 of them in three rarities. You hold 5, in order, and the
   order matters. Each one you hold has a SELL button (half price back); buying a sixth asks which
   one it replaces, and the refund counts towards the price.
-- **Three investments**, bought a level at a time at rising prices: power (+10 W), a resource's
+- **Three investments**, bought a level at a time at rising prices: power (+12 W), a resource's
   port rate (+25%, up to a full belt), a machine kind's speed (+20%), or the value of everything
-  containing a raw material (+20%). An item made of several materials gets every bonus, multiplied.
+  containing a raw material (×1.25 per level, compounding). An item made of several materials gets
+  every bonus, multiplied. Value is the lever that carries a run into the millions.
 
 ### Reading your factory
 
@@ -237,7 +239,33 @@ total. Bosses, investments, alternate recipes and the market are written the sam
 
 ## Balance
 
-The quota curve is a first pass and has not been measured against reference factories yet.
+`lovec . --bench` measures the quota curve in three parts, and fails if the curve stops fitting:
+
+1. **The calculator is right.** `tests/plan.lua` works out what a perfectly balanced line costs
+   in watts and ore. Four real lines are built and simulated, and their revenue and power match
+   the calculator exactly.
+2. **Doing nothing gets you nowhere.** Real runs on 10 seeds that never shop, just smelting and
+   pressing every ore port into the depot, clear 1 to 3 contracts (median 2).
+3. **Reference players.** A model run per style of player: it follows the land the contracts
+   hand out, buys blueprints in a set order, spends the rest on power and on the value of
+   whatever it sold most of, and picks the better of the two markets offered. The calculator
+   then finds the best product mix for each contract. Module slots are the one judgement call: a
+   multiplier per contract, ×4 by the end for a solid player and ×8 for a strong one.
+
+| Contract | Quota | Lazy | Solid | Strong |
+|---|---|---|---|---|
+| 1 | $120 | 0.1 | 0.1 | 0.1 |
+| 3 | $1,500 | 1.3 | 0.5 | 0.3 |
+| 5 | $12K | missed | 0.8 | 0.3 |
+| 7 | $75K | missed | 1.0 | 0.3 |
+| 9 | $400K | missed | 1.6 | 0.5 |
+| 11 | $1.3M | missed | 1.5 | 0.4 |
+| 12 | $2.2M | missed | 2.8 | 0.5 |
+
+Shifts of the 3 each quota takes. A **lazy** run (no blueprints, no modules) dies in the second
+sector. A **solid** run (depth first, then investments) clears all 12, with the last one tight. A
+**strong** run clears everything in one shift and goes on into endless mode, where the quota
+doubles every contract. The bench fails unless solid clears all 12 and lazy does not.
 
 ## Status
 

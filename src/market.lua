@@ -17,7 +17,7 @@ local Market = {}
 Market.MULT = 3                          -- price multiplier of a product in demand
 Market.SLUMP = 0.5                       -- and of the one that slumped
 Market.UNITS = { 60, 30, 24, 12, 6 }     -- demand per shift by tier, in sector 1
-Market.SCALE = { 1, 1.5, 2, 3 }          -- by sector; x1.5 per sector after that
+Market.SCALE = { 1, 2, 3, 5 }            -- by sector; x1.5 per sector after that
 Market.NEVER = { tar = true, diamond = true }   -- never in demand
 
 -- Everything that can be made from a set of raw items with a set of machine

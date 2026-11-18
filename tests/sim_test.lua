@@ -556,9 +556,12 @@ return function()
 
     local q = Contracts.quotas
     local steady = true
-    for i = 2, #q do steady = steady and q[i] / q[i - 1] > 2.2 and q[i] / q[i - 1] < 3 end
-    check('12 quotas from $120 to $5M, each 2.2x to 3x the last', #q == 12 and q[1] == 120 and q[12] == 5000000 and steady)
-    check('endless mode keeps growing at 2.6x', Contracts.quota(13) == 13000000 and Contracts.quota(14) == 34000000,
+    for i = 2, #q do
+      steady = steady and q[i] / q[i - 1] > 1.6 and (i == 2 or q[i] / q[i - 1] <= q[i - 1] / q[i - 2] + 1e-9)
+    end
+    check('12 quotas from $120 to $2.2M, each at least 1.6x the last, the steps never steeper',
+      #q == 12 and q[1] == 120 and q[12] == 2200000 and steady)
+    check('endless mode keeps growing at 2x', Contracts.quota(13) == 4400000 and Contracts.quota(14) == 8800000,
       Contracts.quota(13) .. ' ' .. Contracts.quota(14))
     check('big numbers are written short',
       Fmt.num(950) == '950' and Fmt.num(9999) == '9999' and Fmt.num(12345) == '12.3K'
@@ -602,8 +605,8 @@ return function()
       #missing == 2 and missing[1] == 'wiremill' and missing[2] == 'assembler', table.concat(missing, ','))
     check('steel cannot be made without coal', Market.missing('steel', res, own) == nil)
     check('demand grows with the sector and shrinks with the tier',
-      Market.units('gear', 1) == 24 and Market.units('gear', 2) == 36 and Market.units('motor', 1) == 12
-      and Market.units('wire', 1) == 48 and Market.units('computer', 4) == 18 and Market.units('computer', 5) == 27)
+      Market.units('gear', 1) == 24 and Market.units('gear', 2) == 48 and Market.units('motor', 1) == 12
+      and Market.units('wire', 1) == 48 and Market.units('computer', 4) == 30 and Market.units('computer', 5) == 45)
 
     local rng = require('src.rng').new(9)
     local ok = true
@@ -775,12 +778,12 @@ return function()
     run.index = 12
     run:afterContract()
     check('clearing contract 12 wins the run and still offers a 13th',
-      run.won and #run.offers == 2 and run:contract(13).quota == 13000000)
+      run.won and #run.offers == 2 and run:contract(13).quota == 4400000)
     run:choose(1)
     run:advance()
     check('endless contracts keep their bosses', run.index == 13 and run:contract().sectorBoss ~= nil
       and run:contract(15).isBoss and run:contract(15).sector == 5)
-    check('and their demand keeps growing', Market.units('gear', 5) == 108 and Market.units('gear', 6) == 162,
+    check('and their demand keeps growing', Market.units('gear', 5) == 180 and Market.units('gear', 6) == 270,
       Market.units('gear', 5))
   end
 
@@ -983,9 +986,9 @@ return function()
     check('buying a blueprint unlocks the machine', run:unlocked('assembler'))
     check('buying a recipe adds it to the rules', run:hasRecipe('twin_dies') and #run.rules:recipesFor('press') == 6)
     check('buying a module fills a slot', run.upgrades[1] == 'bullion')
-    check('a grid upgrade adds 10W', run.rules.basePower == watts + 10 and run.levels.power == 1)
+    check('a grid upgrade adds 12W', run.rules.basePower == watts + 12 and run.levels.power == 1)
     check('an investment gains a level, and the next one costs more',
-      run.levels['value:iron'] == 1 and Investments.cost(Investments.byId['value:iron'], 1) == 6)
+      run.levels['value:iron'] == 1 and Investments.cost(Investments.byId['value:iron'], 1) == 5)
     check('credits are spent, and nothing can be bought twice', run.credits == credits - 28 and not run:buy(1))
 
     -- Five slots, then replace.
@@ -1037,9 +1040,9 @@ return function()
     end
 
     local s = runShift(straight('gear'), with({ ['value:iron'] = 2 }))
-    check('iron value 2: gears sell for +40% (30 x $11.20)', near(s.exact, 336), s.exact)
+    check('iron value 2 compounds: gears sell for x1.5625 (30 x $12.50)', near(s.exact, 375), s.exact)
     s = runShift(straight('motor'), with({ ['value:iron'] = 1, ['value:copper'] = 1 }))
-    check('a motor gets the iron and the copper bonus, multiplied (x1.44)', near(s.exact, 30 * 32 * 1.44), s.exact)
+    check('a motor gets the iron and the copper bonus, multiplied (x1.5625)', near(s.exact, 30 * 32 * 1.5625), s.exact)
     s = runShift(straight('glass'), with({ ['value:iron'] = 3 }))
     check('and glass gets neither', near(s.exact, 90), s.exact)
 
@@ -1062,8 +1065,8 @@ return function()
     for mod, rec in pairs(s.ledger) do
       if mod.investment then credited = credited + rec.delta end
     end
-    check('but the ledger credits them (18 ingots x $0.60)', near(credited, count(s, 'iron_ingot') * 0.6), credited)
-    check('power comes in steps of 10W', Investments.watts({ power = 3 }) == 30)
+    check('but the ledger credits them (18 ingots x $0.75)', near(credited, count(s, 'iron_ingot') * 0.75), credited)
+    check('power comes in steps of 12W', Investments.watts({ power = 3 }) == 36)
 
     -- Alternate recipes.
     s = runShift(layout({ 'I> s> p> E<' }), Rules.new({ Alternates.byId.twin_dies }))

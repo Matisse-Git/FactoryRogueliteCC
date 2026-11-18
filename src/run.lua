@@ -334,7 +334,7 @@ function Run:payout()
   local R = Contracts.reward
   local c = self:contract()
   local p = {
-    base = c.isBoss and R.boss or R.normal,
+    base = R.normal + R.perSector * (c.sector - 1) + (c.isBoss and R.boss or 0),
     unused = self:shiftsLeft() * R.perUnusedShift,
     interest = math.min(R.interestCap, math.floor(self.credits / R.interestPer)),
     stretch = self.bonus or 0,

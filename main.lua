@@ -1,7 +1,7 @@
 -- QUOTA - a factory roguelite.
 --   love .            play
 --   lovec . --test    run the headless simulation tests
---   lovec . --bench   print revenue of reference layouts (for tuning quotas)
+--   lovec . --bench   check the quota curve against reference factories
 
 local flags = {}
 for _, a in ipairs(arg or {}) do flags[a] = true end

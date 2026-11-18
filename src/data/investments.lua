@@ -1,13 +1,14 @@
 -- Investments: the incremental upgrades. Unlimited in number, bought a level
 -- at a time, each level a little dearer than the last. Four families:
 --
---   power             +10W per level
+--   power             +12W per level
 --   rate:<item>       a raw resource's ports supply 25% more per level,
 --                     up to a full belt (60/min)
 --   speed:<kind>      machines of that kind run 20% faster per level
---   value:<material>  items containing that raw material sell for 20% more
---                     per level; an item gets the bonus of every material
---                     in it, multiplied together
+--   value:<material>  items containing that raw material sell for 25% more
+--                     per level, compounding (x1.25, x1.56, x1.95...); an
+--                     item gets the bonus of every material in it,
+--                     multiplied together
 --
 -- An investment works through the same hooks as a module (see
 -- src/data/upgrades.lua) but is `quiet`: it has no card, the board does not
@@ -18,10 +19,10 @@ local Machines = require 'src.data.machines'
 
 local Investments = {}
 
-Investments.POWER = 10          -- watts per level
+Investments.POWER = 12          -- watts per level
 Investments.RATE = 0.25         -- port rate per level
 Investments.SPEED = 0.2         -- machine speed per level
-Investments.VALUE = 0.2         -- item value per level
+Investments.VALUE = 0.25        -- item value per level
 Investments.MAX_RATE = 4        -- levels: 30/min -> 60/min
 Investments.MAX_SPEED = 5
 
@@ -31,8 +32,6 @@ local MAKERS = {
   'smelter', 'crusher', 'press', 'wiremill', 'foundry', 'refinery',
   'assembler', 'manufacturer', 'polisher', 'packer',
 }
-
-local function pct(x) return math.floor(x * 100 + 0.5) .. '%' end
 
 local list = {}
 Investments.list = list
@@ -47,7 +46,7 @@ add({
   id = 'power', family = 'power', name = 'Grid Upgrade', icon = { machine = 'node' },
   cost = 3, step = 1,
   effect = function(level) return '+' .. level * Investments.POWER .. 'W' end,
-  desc = 'The site supplies 10W more per level.',
+  desc = 'The site supplies 12W more per level.',
 })
 
 for _, item in ipairs(RAW) do
@@ -74,10 +73,19 @@ for _, mat in ipairs(Items.materials) do
   add({
     id = 'value:' .. mat, family = 'value', mat = mat, name = Items.materialName[mat] .. ' Value',
     icon = { item = RAW_OF[mat], money = true },
-    cost = 4, step = 2,
-    effect = function(level) return '+' .. pct(Investments.VALUE * level) end,
-    desc = 'Items containing ' .. Items.materialName[mat] .. ' sell for 20% more per level. An item made of several materials gets every bonus, multiplied.',
+    cost = 4, step = 1,
+    effect = function(level)
+      local f = Investments.valueFactor(level)
+      return 'X' .. string.format(f < 10 and '%.2f' or f < 100 and '%.1f' or '%d', f)
+    end,
+    desc = 'Items containing ' .. Items.materialName[mat] .. ' sell for 25% more per level, compounding. An item made of several materials gets every bonus, multiplied.',
   })
+end
+
+-- What a value investment at `level` multiplies an item's price by. Levels
+-- compound: this is the lever that carries a run into the millions.
+function Investments.valueFactor(level)
+  return (1 + Investments.VALUE) ^ level
 end
 
 -- Price of the next level, given the level already held.
@@ -108,7 +116,7 @@ function Investments.mod(def, level)
       return e.building.kind == kind and factor or 1
     end
   elseif def.family == 'value' then
-    local mat, factor = def.mat, 1 + Investments.VALUE * level
+    local mat, factor = def.mat, Investments.valueFactor(level)
     mod.value = function(s, ctx)
       if ctx.mats[mat] then ctx.value = ctx.value * factor end
     end
