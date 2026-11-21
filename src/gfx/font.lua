@@ -71,16 +71,26 @@ function Font.width(s, scale)
 end
 
 -- Draw text with its top-left corner at (x, y) in the current colour.
+-- Like a typewriter's, each key strikes a little harder or softer than the
+-- last; text at 2x and up is struck twice, for headings in bold.
 function Font.print(s, x, y, scale)
   s = tostring(s):upper()
   scale = scale or 1
   x, y = math.floor(x), math.floor(y)
+  local r, g, b, a = love.graphics.getColor()
+  local bold = scale >= 2
   for i = 1, #s do
     local ch = s:sub(i, i)
     local q = quads[ch]
-    if q then love.graphics.draw(atlas, q, x, y, 0, scale, scale) end
+    if q then
+      local ink = 1 - ((i * 37 + ch:byte() * 11 + x) % 7) * 0.025
+      love.graphics.setColor(r, g, b, a * ink)
+      love.graphics.draw(atlas, q, x, y, 0, scale, scale)
+      if bold then love.graphics.draw(atlas, q, x + 1, y, 0, scale, scale) end
+    end
     x = x + advance(ch) * scale
   end
+  love.graphics.setColor(r, g, b, a)
 end
 
 -- Break text into lines no wider than `maxChars` standard characters.

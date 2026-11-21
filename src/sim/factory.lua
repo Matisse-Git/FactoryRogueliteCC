@@ -2,6 +2,10 @@
 -- No love.graphics in here, so it runs headless for the tests.
 --
 -- Tick order: cleanup -> ports -> power -> machines -> transfer -> oven.
+--
+-- A shift starts warm: the factory runs for WARMUP ticks first, with nothing
+-- sold or counted, so the measured shift is the steady state and what a
+-- layout earns is its rates times the length of the shift.
 
 local ECS = require 'src.ecs'
 local D = require 'src.sim.dirs'
@@ -13,8 +17,10 @@ local Transfer = require 'src.sim.transfer'
 
 local Factory = {}
 Factory.__index = Factory
-Factory.W, Factory.H = 14, 10
-local W, H = Factory.W, Factory.H
+Factory.W, Factory.H = 32, 18      -- default board size: the whole site (see src/map.lua)
+Factory.PAD_SPEED = 1.5            -- a machine on a booster pad
+Factory.WARMUP = 150               -- ticks run before the clock starts
+Factory.BUSY = 0.9                 -- share of a shift a machine must work to count as "non-stop"
 
 ---------------------------------------------------------------- systems
 
@@ -31,16 +37,19 @@ local function portSystem(world)
   for i = 1, #ports do
     local e = ports[i]
     local p = e.port
-    if p.cd > 0 then p.cd = p.cd - 1 end
-    if p.cd == 0 and not e.slot.item then
+    -- A port fills up at its rate and lets an item go whenever it holds a
+    -- whole one and its mouth is free, so any rate up to one a tick works.
+    p.acc = p.acc + p.rate
+    if p.acc >= 1 and not e.slot.item then
       e.slot.item = world:spawn({
         item = { type = p.item, polished = 0, dist = 0 },
         pos = { x = e.pos.x, y = e.pos.y },
         prev = { x = e.pos.x, y = e.pos.y },
         hidden = true,
       })
-      p.cd = p.period
+      p.acc = p.acc - 1
     end
+    if p.acc > 1 then p.acc = 1 end       -- blocked: it holds one item, no more
   end
 end
 
@@ -60,6 +69,8 @@ local function powerSystem(world, F)
   local s = F.shift
   s.supply, s.demand = supply, demand
   s.factor = (demand > supply) and (supply / demand) or 1
+  s.supplySum = s.supplySum + supply
+  s.demandSum = s.demandSum + math.min(demand, supply)
 end
 
 local function machineSystem(world, F)
@@ -86,33 +97,42 @@ end
 
 ---------------------------------------------------------------- factory
 
-function Factory.new()
+function Factory.new(w, h)
   local F = setmetatable({}, Factory)
+  F.W, F.H = w or Factory.W, h or Factory.H
   F.world = ECS.world()
   F.grid = {}
+  F.floor = {}                     -- tile index -> 'pad'
   F.slots = {}
   F.events = {}
   F.ovenBelts = {}
   F.recipes = {}
   F.rules = Rules.new({})
-  F.unplaced = 0
-  local w = F.world
-  w:addSystem('tick', cleanupSystem)
-  w:addSystem('tick', portSystem)
-  w:addSystem('tick', powerSystem)
-  w:addSystem('tick', machineSystem)
-  w:addSystem('tick', Transfer.system)
-  w:addSystem('tick', ovenSystem)
+  local world = F.world
+  world:addSystem('tick', cleanupSystem)
+  world:addSystem('tick', portSystem)
+  world:addSystem('tick', powerSystem)
+  world:addSystem('tick', machineSystem)
+  world:addSystem('tick', Transfer.system)
+  world:addSystem('tick', ovenSystem)
   return F
 end
 
 function Factory:inBounds(x, y)
-  return x >= 0 and y >= 0 and x < W and y < H
+  return x >= 0 and y >= 0 and x < self.W and y < self.H
 end
 
 function Factory:at(x, y)
-  if x < 0 or y < 0 or x >= W or y >= H then return nil end
-  return self.grid[y * W + x]
+  if x < 0 or y < 0 or x >= self.W or y >= self.H then return nil end
+  return self.grid[y * self.W + x]
+end
+
+function Factory:setFloor(x, y, what)
+  self.floor[y * self.W + x] = what
+end
+
+function Factory:floorAt(x, y)
+  return self.floor[y * self.W + x]
 end
 
 -- Spawn a building entity. The tile must be empty.
@@ -132,20 +152,30 @@ function Factory:place(kind, x, y, dir, extra)
   elseif kind == 'splitter' then
     e.splitter = { ptr = 1, count = 0 }
     e.slot = Transfer.newSlot(e, 'split')
+  elseif kind == 'filter' then
+    e.filter = { item = extra.item, ptr = 1 }     -- item: the type that goes straight on
+    e.slot = Transfer.newSlot(e, 'filter')
   elseif kind == 'port' then
-    e.port = { item = extra.item, period = extra.period or 2, cd = 0, sent = 0 }
+    -- period: seconds per item on the plot; rate: items per tick this shift.
+    e.port = { item = extra.item, period = extra.period or 2, rate = 1 / (extra.period or 2), acc = 1, sent = 0 }
     e.slot = Transfer.newSlot(e, 'port')
   elseif kind == 'export' then
-    e.export = { cd = 0, taken = 0, sold = 0, log = {} }
+    -- premium[d]: price multiplier for items entering while travelling d.
+    -- closed[d]: that face takes nothing this contract.
+    e.export = { cd = 0, taken = 0, sold = 0, log = {}, premium = {}, closed = {} }
   elseif kind == 'rubble' then
     e.rubble = true
+  elseif kind == 'rock' then
+    e.rock = true
+  elseif kind == 'node' then
+    e.node = true
   else
     e.machine = { def = def }
     if not def.generator then e.slot = Transfer.newSlot(e, 'out') end
     Machine.reset(e)
   end
   self.world:spawn(e)
-  self.grid[y * W + x] = e
+  self.grid[y * self.W + x] = e
   return e
 end
 
@@ -154,7 +184,7 @@ function Factory:remove(x, y, evenFixed)
   local e = self:at(x, y)
   if not e or (e.building.fixed and not evenFixed) then return nil end
   self.world:despawn(e)
-  self.grid[y * W + x] = nil
+  self.grid[y * self.W + x] = nil
   return e.building.kind, e.building.dir
 end
 
@@ -187,16 +217,34 @@ function Factory:plannedDraw(rules)
   local machines = self.world:query('machine')
   for i = 1, #machines do
     local e = machines[i]
-    if not e.machine.def.generator then
+    if not e.machine.def.generator and rules:speed(self, e) > 0 then
       total = total + rules:draw(self, e, e.machine.def.draw or 0)
     end
   end
   return total
 end
 
+local function newShift(rules, ledger)
+  return {
+    tick = 0, len = rules.shiftLen,
+    revenue = 0, plain = 0, sales = 0, sold = {}, order = {},
+    supply = rules.basePower, demand = 0, factor = 1,
+    supplySum = 0, demandSum = 0,
+    ledger = ledger,
+  }
+end
+
+-- Items per tick a port supplies under these rules: its own rate times what
+-- has been invested in its resource, at most a full belt.
+function Factory:portRate(e, rules)
+  return math.min(1, (1 / e.port.period) * (rules.portRate[e.port.item] or 1))
+end
+
+-- info.warm overrides the number of warm-up ticks (0 = a cold start);
+-- info.shiftNo is the number of this shift within its contract.
 function Factory:beginShift(rules, info)
   self.rules = rules
-  self.unplaced = info and info.unplaced or 0
+  self.shiftId = (self.shiftId or 0) + 1
   self:clearItems()
 
   self.recipes = {}
@@ -224,11 +272,16 @@ function Factory:beginShift(rules, info)
       end
     end
     if e.splitter then e.splitter.ptr = 1; e.splitter.count = 0 end
-    if e.port then e.port.cd = 0; e.port.sent = 0 end
+    if e.filter then e.filter.ptr = 1 end
+    if e.port then
+      e.port.rate = self:portRate(e, rules)
+      e.port.acc, e.port.sent = 1 - e.port.rate, 0      -- the first item leaves on the first tick
+    end
     if e.export then e.export.cd = 0; e.export.sold = 0; e.export.log = {} end
     if e.machine then
       Machine.reset(e)
-      e.machine.speed = rules:speed(self, e)
+      e.machine.shiftId = self.shiftId
+      e.machine.speed = rules:speed(self, e) * self:padSpeed(e)
       e.machine.draw = rules:draw(self, e, e.machine.def.draw or 0)
       -- Mods that change this machine where it stands count once per machine.
       e.machine.mods = rules:affecting(self, e)
@@ -244,21 +297,46 @@ function Factory:beginShift(rules, info)
     end
   end
 
-  self.shift = {
-    tick = 0, len = rules.shiftLen,
-    revenue = 0, plain = 0, sales = 0, sold = {}, order = {},
-    supply = rules.basePower, demand = 0, factor = 1,
-    ledger = ledger,
-  }
+  self.shift = newShift(rules, ledger)
+  self.shift.shiftNo = info and info.shiftNo or 1
   self.events = {}
   rules:resetShift()
+
+  local warm = info and info.warm or Factory.WARMUP
+  if warm > 0 then
+    -- Run until the factory is flowing; nothing is sold or counted.
+    self.shift.warming = true
+    for _ = 1, warm do self.world:run('tick', self) end
+    self.shift.warming = nil
+  end
+  self:zeroCounters()
+end
+
+-- Start the clock from zero, with whatever is on the belts left there.
+function Factory:zeroCounters()
+  local s = self.shift
+  s.tick, s.supplySum, s.demandSum = 0, 0, 0
+  local list = self.world:query('building')
+  for i = 1, #list do
+    local e = list[i]
+    if e.slot then e.slot.passed = 0 end
+    if e.bridge then e.bridge.lanes[1].passed = 0; e.bridge.lanes[2].passed = 0 end
+    if e.port then e.port.sent = 0 end
+    if e.export then e.export.sold = 0; e.export.log = {} end
+    if e.machine then
+      local m = e.machine
+      m.made, m.idle, m.busy = 0, 0, 0
+    end
+  end
+  self.events = {}
+  self.rules:resetShift()
 end
 
 -- A mod did something at tile (x, y): book it and tell whoever is watching.
 -- `what` is 'sale' | 'dup' | 'smelt' | 'craft' | 'polish'. A nil mod (a rule
--- field nobody owns) is ignored.
+-- field nobody owns) is ignored, and so is anything during the warm-up.
 function Factory:trigger(mod, x, y, delta, what)
-  if not mod then return end
+  if not mod or self.shift.warming then return end
   local ledger = self.shift.ledger
   local rec = ledger[mod]
   if not rec then
@@ -280,9 +358,17 @@ function Factory:finished()
   return self.shift.tick >= self.shift.len
 end
 
-function Factory:sell(itemE, exportE)
+-- Speed of a machine from the floor it stands on.
+function Factory:padSpeed(e)
+  return self.floor[e.pos.y * self.W + e.pos.x] == 'pad' and Factory.PAD_SPEED or 1
+end
+
+-- d: the direction the item was travelling when it entered the export.
+function Factory:sell(itemE, exportE, d)
   local s = self.shift
-  local value, ctx, fired = self.rules:sale(itemE.item, s.tick, s.len)
+  if s.warming then return end        -- the warm-up sells nothing
+  local value, ctx, fired = self.rules:sale(itemE.item, s.tick, s.len,
+    { premium = d and exportE.export.premium[d] })
   s.revenue = s.revenue + value
   s.plain = s.plain + ctx.plain
   s.sales = s.sales + 1
@@ -292,11 +378,11 @@ function Factory:sell(itemE, exportE)
     s.sold[ctx.type] = rec
     s.order[#s.order + 1] = ctx.type
   end
-  rec.n = rec.n + 1
+  rec.n = rec.n + ctx.units           -- a crate counts as the items in it
   rec.total = rec.total + value
   local ex = exportE.export
-  ex.sold = ex.sold + 1
-  ex.log[ctx.type] = (ex.log[ctx.type] or 0) + 1
+  ex.sold = ex.sold + ctx.units
+  ex.log[ctx.type] = (ex.log[ctx.type] or 0) + ctx.units
   local x, y = exportE.pos.x, exportE.pos.y
   self.events[#self.events + 1] = { kind = 'sale', x = x, y = y, value = value, fired = fired }
   if fired then
@@ -304,44 +390,58 @@ function Factory:sell(itemE, exportE)
   end
 end
 
+-- Share of the shift so far that machine entity e spent crafting (0..1), or
+-- nil for a generator, a machine placed since the last shift began, or
+-- before any tick has run. Stays readable after the shift, while rebuilding.
+function Factory:utilisation(e)
+  local m = e.machine
+  local ticks = self.shift and self.shift.tick or 0
+  if not m or m.def.generator or ticks <= 0 or m.shiftId ~= self.shiftId then return nil end
+  return math.min(1, (m.busy or 0) / ticks)
+end
+
 -- Close the shift: apply end-of-shift rules and return the summary.
 function Factory:endShift()
   local s = self.shift
   local perfect, any = true, false
+  local lowest
+  local count, busy = 0, 0
   local machines = self.world:query('machine')
   for i = 1, #machines do
-    local m = machines[i].machine
-    if not m.def.generator then
+    local e = machines[i]
+    local u = self:utilisation(e)
+    if u then
       any = true
-      if not m.started or m.idle > 0 then perfect = false end
+      count = count + 1
+      if u < Factory.BUSY then perfect = false else busy = busy + 1 end
+      if not lowest or u < lowest.u then lowest = { u = u, kind = e.building.kind } end
     end
   end
+  local ticks = math.max(1, s.tick)
+  local supply, demand = s.supplySum / ticks, s.demandSum / ticks
   local sc = {
     revenue = s.revenue, mult = 1, notes = {},
     sold = s.sold, kinds = #s.order,
-    perfect = any and perfect, unplaced = self.unplaced,
+    perfect = any and perfect,
+    spare = math.max(0, supply - demand),
+    shiftNo = s.shiftNo, busy = busy, machines = count,
   }
   local results = self.rules:shiftEnd(sc)
-  local total = math.floor(s.revenue * sc.mult + 0.5)
-  local last
+  local exact = s.revenue * sc.mult
+  local total = math.floor(exact + 0.5)
   for _, res in ipairs(results) do
     if res.fired then
       local rec = s.ledger[res.mod]
       rec.delta = rec.delta + res.delta
       rec.n = rec.n + 1
-      last = res
     end
   end
-  if last then   -- rounding goes to the last multiplier, as it does per sale
-    local resid = total - s.revenue * sc.mult
-    last.delta = last.delta + resid
-    s.ledger[last.mod].delta = s.ledger[last.mod].delta + resid
-  end
-  -- `plain` + every ledger delta = `total`.
+  -- `plain` + every ledger delta = `exact`; `total` is that, rounded.
   return {
-    base = s.revenue, mult = sc.mult, notes = sc.notes, total = total,
+    base = s.revenue, mult = sc.mult, notes = sc.notes, total = total, exact = exact,
     sold = s.sold, order = s.order, perfect = sc.perfect,
     plain = s.plain, ledger = s.ledger, results = results,
+    ticks = s.tick, supply = supply, demand = demand, lowest = lowest,
   }
 end
 

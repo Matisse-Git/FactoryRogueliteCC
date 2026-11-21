@@ -1,11 +1,14 @@
-# QUOTA — a factory roguelite (prototype)
+# QUOTA — a factory roguelite
 
 Factorio-style throughput puzzles in a Balatro-style run. No exploration: one
-screen, a kit of machines, and a revenue quota to beat.
+site, a factory you keep building for the whole run, and a revenue quota that
+grows from $120 to $2,200,000, and past it in endless mode.
 
 Built with [LÖVE 11.5](https://love2d.org) and a small handwritten ECS.
-320×180 internal resolution, scaled by whole numbers and shown through a
-CRT filter (both adjustable in the settings, F10).
+320×180 pixel art in a retro industrial look: a sunlit site seen from above, with the menus and
+reports done as 1950s paperwork. Scaled by whole numbers and shown through a print filter (paper
+grain, slightly misregistered ink), or a CRT filter, or none (settings, F10). Music, ambience and
+sound effects are all synthesised when the game starts: there are no audio files.
 
 ## Run it
 
@@ -25,61 +28,163 @@ lovec . --bench
 lovec . --shots
 ```
 
-- `--test` runs the headless simulation tests.
-- `--bench` prints what reference layouts earn per shift, with and without each upgrade (for tuning quotas).
-- `--shots` drives the real game with mouse and keyboard events, checks the results, and saves screenshots to the LÖVE save directory.
-  The numbered shots are the bare canvas; the `*_crt_*` ones go through the CRT filter. It ignores your saved settings.
+```bash
+lovec . --audio
+```
+
+- `--test` runs the headless tests: the simulation, the rules, the run, saving.
+- `--bench` prints what reference factories earn against every quota (see Balance).
+- `--shots` drives the real game with mouse and keyboard events, checks the results, and saves
+  screenshots to the LÖVE save directory. The numbered shots are the bare canvas; the `*_crt_*`
+  ones go through the CRT filter, and the `*_print_*` ones through the print filter. It ignores
+  your saved settings, records and run, and is silent.
+- `--audio` renders the music and ambience, checks them, and saves each as a WAV file in the
+  save directory, to listen to.
+- `--sheet` saves every machine sprite, every frame, at both sizes, to `sheet.png`.
 
 ## How a run works
 
-- A run is **9 contracts** in 3 sectors. Every third contract is a boss with a twist.
+- A run is **12 contracts** in 4 sectors. Every third contract is a boss. After the twelfth the
+  run is won, and can go on in **endless mode** until a quota is missed.
 - Each contract gives you **3 shifts of 60 seconds** to earn its **revenue quota**.
 - **Build** with time stopped, press **Run**, watch the shift, then rebuild before the next one.
-  Items are cleared at the start of every shift; the same layout always earns the same amount.
-- Raw items enter from **ports** on the left. Everything that reaches the **export** is sold.
-- **Machines are owned pieces**: you place, move and rotate them for free. Belts are unlimited.
-- **Power**: machines draw watts while crafting. Over the limit, every machine slows down in proportion.
-- Clearing a contract pays **credits** (plus a bonus per unused shift and interest on savings).
-  The **shop** offers 2 machines and 2 upgrades. You hold at most 5 upgrades.
+  The same layout always earns the same amount.
+- **Shifts start warm**: the factory runs until it is flowing before the clock starts, so a shift
+  earns exactly its steady rates times 60 seconds. What you calculated is what you get.
 - Miss a quota and the run is over. Runs are seeded.
+
+### The site
+
+- One **site** for the whole run: 4×3 plots of 8×6 tiles. You start on one plot with the **depot**
+  in its middle. The depot never moves and sells whatever enters it, from any of its 8 faces.
+- Every contract after the first brings a **plot** of new land, which you place in any free slot
+  touching land you own. A plot has 1–3 **ports** (a raw resource at 30 items per minute), some
+  rock, and sometimes a special: booster pads (a machine on one runs 50% faster), a power node
+  (+12 W), a rich port (60/min) or a premium depot face (items entering through it sell for +50%).
+- Nothing is ever wiped. Moving and rotating pieces is free.
+
+### The factory
+
+- **Blueprints**: a machine you have the blueprint for can be placed any number of times, for free.
+  You start with the smelter and the press. Belts, splitters, bridges, filters and generators need
+  no blueprint.
+- **Power is the budget**: machines draw watts while crafting. Over the limit, every machine slows
+  down in proportion, so the question is always which machines the watts are best spent on.
+- **Depth pays**: every recipe is worth about 2.7× what goes into it. Ore is $1; a computer, five
+  steps later, is $437.
+
+| Machine | Shape | Rate | Watts | Makes |
+|---|---|---|---|---|
+| Smelter | 1 → 1 | 15/min | 3 | ingots from ore or dust, glass from quartz or sand |
+| Crusher | 1 → 2 | 30/min | 4 | 2 dust from 1 ore: the ore goes twice as far |
+| Press | 1 → 1 | 20/min | 3 | gear, copper plate, gold foil, lens, steel beam |
+| Wire mill | 1 → 2 | 30/min | 3 | 2 wire, gold wire or glass fibre |
+| Foundry | 2 → 1 | 12/min | 6 | steel, silicon, electrum |
+| Refinery | 1 → 2 different | 15/min | 6 | plastic and tar from crude oil |
+| Assembler | 2 → 1 | 10/min | 5 | motor, circuit, cable, chip, lamp |
+| Manufacturer | 3 → 1 | 6/min | 12 | engine, camera, robot, computer |
+| Polisher | any → same | 30/min | 10 | the item sells for double |
+| Packer | 4 → 1 | 30/min | 2 | a crate: 4 identical items in one belt slot, worth 10% more |
+
+- A **filter** sends its chosen item straight on and everything else out of its sides (F sets the item).
+- The refinery's **tar** has to go somewhere, or the refinery stops. Sell it, or burn it: a
+  **generator** burns coal or tar for +10 W.
+- A belt carries 60 items per minute. So does each depot face.
+
+### Contracts and markets
+
+- Every contract has a **market**: 2 products **in demand** (3 from the third sector on) sell for
+  ×3, but only on the first N units of each per shift. Filling every demand means splitting the
+  factory, not building one line. From the second sector on, one product also **slumps** to half
+  price, and on one of the two offers it is the product you sold most of.
+- After a contract you choose between **two offers**, each a plot and a market, seen in full.
+  At least one demand is something you can already make; the other may need a machine you lack,
+  in which case the contract pays extra credits. You shop after choosing.
+- **Bosses** attack the factory that is standing: a plot loses power, a resource's ports run dry,
+  a machine kind runs at half speed, depot faces close, belt length is taxed. The boss of a sector
+  is announced on its first contract, three contracts ahead, with its target; a plot it will cut
+  off is hatched in red on the board from then on. Beating a boss gives a free pick of one from
+  three blueprints.
+
+### The shop
+
+Clearing a contract pays **credits**: 5, plus 3 for every sector after the first and 3 for a boss,
+2 per unused shift, interest on what you
+kept ($1 per $5, up to $5), 2 for each of 2×, 4× and 8× the quota, and 2 for a hard market. The
+shop offers six things, and one reroll replaces all six:
+
+- **One blueprint or alternate recipe.** Alternate recipes are permanent and take no slot: 2 gears
+  from one ingot, steel straight from ore, plastic from tar.
+- **Two modules**, the rule-benders: 40 of them in three rarities. You hold 5, in order, and the
+  order matters. Each one you hold has a SELL button (half price back); buying a sixth asks which
+  one it replaces, and the refund counts towards the price.
+- **Three investments**, bought a level at a time at rising prices: power (+12 W), a resource's
+  port rate (+25%, up to a full belt), a machine kind's speed (+20%), or the value of everything
+  containing a raw material (×1.25 per level, compounding). An item made of several materials gets
+  every bonus, multiplied. Value is the lever that carries a run into the millions.
+
+### Reading your factory
+
+The game states every rate per minute and measures what actually happened; it never plans for you.
+
+- Hover a machine, a port or a palette entry for its rate and watts.
+- During a shift the top bar shows what the factory earns per second, and the sidebar how much
+  of each demand is filled.
+- Hover a machine during or after a shift for the share of the shift it spent working; hover a belt
+  for how full it ran. **U** prints that share on every machine at once (green from 90%). The shift
+  summary names the machine that worked least.
+- The recipe book (Tab) has every machine, recipe and sell value, including machines you have
+  not unlocked.
 
 ### Reading your upgrades
 
-- An upgrade's **card pops** whenever it changes something: a sale, a machine, the shift total.
-  A harmful change (a sale zeroed by Embargo or a boss twist) flashes red and shakes instead;
-  a boss twist does this on the `BOSS:` label.
-- The **ledger** fills the box under the cards during a shift: what each upgrade earned or cost,
-  or how often it triggered. Hover a card to read its description instead.
-- The **sale popup** at the export is red for a `$0` sale, and otherwise takes the colour of the
-  upgrade that added the most.
-- **Tiles flash** where an upgrade acts on the board (a duplicated item, an oven smelt, a diamond).
-- Machines changed by a placement upgrade (Assembly Line, Direct Drive, Hand Crank) carry a
-  **pip** in its colour, while building too. Hover the card to outline them.
-- The **shift summary** plays end-of-shift upgrades one line at a time, met or not.
-
-Numbers worth knowing: a belt carries 1 item/s, a port supplies 1 item per 2 s,
-a smelter takes 4 s, a press 3 s, an assembler 6 s. The recipe book (Tab) has the rest.
+- A module's **card pops** whenever it changes something: a sale, a machine, the shift total.
+  A harmful change flashes red and shakes instead; a boss twist does this on the `BOSS:` label.
+- The **ledger** fills the sidebar during a shift: what the market, each module, your investments
+  and the boss earned or cost. Their credits add up to the shift total.
+- The **sale popup** at the depot is red for a `$0` sale, and otherwise takes the colour of
+  whatever added the most.
+- **Tiles flash** where a module acts on the board. Machines changed by a placement module
+  (Assembly Line, Direct Drive, Hand Crank...) carry a **pip** in its colour, while building too.
+  Hover the card to outline them.
+- The **shift summary** plays end-of-shift modules one line at a time, met or not.
 
 ## Controls
 
 | Input | Action |
 |---|---|
 | Left click | Place the selected piece; drag to lay belts; with nothing selected, pick a piece up |
-| Right click | Remove (drag to erase); off the board, deselect |
-| R / mouse wheel | Rotate the selected piece, or the piece under the cursor |
-| 1–9 | Select a piece from the kit |
-| Q / Esc | Deselect |
-| Esc (nothing selected) / MENU button | Pause menu: resume, settings, abandon run |
-| X | Clear the board |
+| Right click | Remove (drag to erase); off the board, put the tool away |
+| R | Rotate the selected piece, the stamp, or the piece under the cursor |
+| 1–9, 0 | Select a piece from the palette |
+| V | Select tool: drag a box, then C copies, X cuts, Delete removes |
+| F | Choose the item of the filter under the cursor |
+| Q / Esc | Put the tool or selection away |
+| Mouse wheel / Z | Zoom: close up, or the whole site. Both are fully playable |
+| WASD / arrows / middle drag | Move the camera |
 | Space / Enter | Run the shift; during a shift, Space pauses |
 | 1 / 2 / 3 (during a shift) | Speed 1×, 2×, 4× |
-| Tab | Recipe book |
+| U | Show how busy each machine was |
+| Tab | Recipe book (arrows or 1–4 turn the pages) |
+| Esc (nothing in hand) / MENU | Pause menu: resume, settings, save and quit, abandon run |
 | F10 | Settings, from anywhere |
 | F11 | Fullscreen |
 
+### Saving
+
+The run in progress is saved on its own: when a shift starts, after every purchase and choice,
+when the pause menu opens and when the game closes. **Continue** on the title screen picks it up.
+A shift that was cut short is simply run again. The save is removed when the run ends.
+
 ### Settings
 
-- **CRT filter**: scanlines, a soft glow, darker corners, a faint colour fringe near the edges
+- **Sound**: effects and ambience volume, 0 to 100. 0 is silent.
+- **Music**: music volume, 0 to 100. One theme in two arrangements: a relaxed one while you
+  build, a driving one while a shift runs, crossfading between them.
+- **Filter**: Print (the default), CRT or Off.
+  - **Print**: the picture as a printed page: paper grain, the ink plates a fraction of a pixel
+    out of register, faintly yellowed edges. One strength slider, 50 by default.
+- **CRT** (when chosen): scanlines, a soft glow, darker corners, a faint colour fringe near the edges
   and a slight bulge. Nothing in it moves or flickers. Scanlines fade out when the picture is
   shown at less than 3×.
   - **Simple**: one strength slider for the whole filter, 0 to 100. 50 is the default, 0 turns it off.
@@ -90,8 +195,8 @@ a smelter takes 4 s, a press 3 s, an assembler 6 s. The recipe book (Tab) has th
 - **Integer scaling**: on, the picture is scaled by whole numbers with black bars around it.
   Off, it fills the window as far as its 16:9 shape allows.
 
-Settings are saved to `settings.txt` in the LÖVE save directory. A running shift waits while
-the pause menu or the settings are open.
+Settings, records and the saved run live in the LÖVE save directory (`settings.txt`,
+`records.txt`, `run.lua`).
 
 ## Where things live
 
@@ -99,48 +204,91 @@ the pause menu or the settings are open.
 main.lua, conf.lua     entry point and window setup
 src/ecs.lua            entities, component queries, systems
 src/sim/               the simulation (no graphics): factory, belts, machines
-src/rules.lua          hook dispatcher for upgrades and boss twists
-src/run.lua            run state: kit, credits, contracts, shop
+src/rules.lua          hook dispatcher for everything that changes the rules
+src/map.lua            the site: plot slots, annexing, plot generation
+src/market.lua         demand, slumps, what a site can make
+src/run.lua            run state: blueprints, modules, credits, contracts, shop
+src/save.lua           the run in progress, as a data-only Lua file
+src/records.lua        records across runs
 src/settings.lua       player settings and their file
+src/sfx.lua            sound effects, synthesised at load time
+src/audio.lua          music and ambience, synthesised at load time
 src/data/              ALL content and balance: items, recipes, machines,
-                       upgrades, contracts (quotas, bosses, payouts)
-src/gfx/               palette, pixel font, sprites (authored as text);
-                       crt.lua is the CRT filter and its mouse correction
-src/ui/                screens: title, game, shop, recipe book; pause.lua and
-                       settings.lua are the pause menu and settings panel;
-                       fx.lua holds the upgrade feedback (card pops, tile
-                       flashes)
-tests/                 headless tests, ASCII layout loader, benchmark
+                       upgrades (modules), investments, alternates, bosses,
+                       contracts (quotas, land, payouts)
+src/gfx/               palette, typewriter font, sprites (items authored as
+                       text; machines drawn from shapes in art.lua, animated),
+                       terrain.lua bakes the site and its scenery; crt.lua
+                       holds the print and CRT filters and the mouse correction
+src/ui/                screens: title, game, board (contract choice), shop,
+                       recipe book; pause, settings and records panels; fx.lua
+                       holds the upgrade feedback (card pops, tile flashes);
+                       particles.lua and life.lua the dust, smoke, coins,
+                       workers, trucks, animals, birds and clouds
+tests/                 headless tests, ASCII layout loader, belt router, benchmark
 tools/shots.lua        scripted play-through with screenshots
+tools/sheet.lua        machine sprite sheet; tools/audio.lua the WAV dump
 ```
 
-### Adding an upgrade
+### How the rules fit together
 
-Upgrades are tables of hooks in `src/data/upgrades.lua`; the header of that
-file lists every hook. For example, "iron counts as gold":
+Everything that changes a sale, a machine or a shift is a table of hooks, and they all go
+through `src/rules.lua` in one fixed order: the site's own rules, investments, the market,
+alternate recipes, modules left to right, then the boss. So a product in demand is tripled
+after its material bonuses, and a module's multiplier lands on top of both.
+
+### Adding a module
+
+Modules are tables of hooks in `src/data/upgrades.lua`; the header of that file lists every
+hook. For example, "tier 2 items sell for triple":
 
 ```lua
 {
-  id = 'fools_gold', name = "Fool's Gold", code = 'FG', color = 'gold', cost = 7,
-  desc = 'Iron items count as gold when sold.',
-  sellAs = function(s, ctx)
-    if ctx.mats.iron then
-      ctx.mats.gold = true
-      ctx.type = GOLD_EQUIVALENT[ctx.type] or ctx.type
-    end
+  id = 'bullion', name = 'Bullion', code = 'BU', color = 'gold', rarity = 'common',
+  desc = 'Tier 2 items (ingots, glass, plastic) sell for triple.',
+  value = function(s, ctx)
+    if ctx.tier == 2 then ctx.value = ctx.value * 3 end
   end,
 },
 ```
 
-Hooks run in slot order, left to right, so the order of your upgrades matters.
+A module never declares when it triggers. `src/rules.lua` compares the sale, the shift
+multiplier or the machine before and after each hook, and remembers which mod set each rule
+field or added each recipe, so the card pop, the ledger entry and the board markers come for
+free. Each mod is credited with its own change in order, and the credits add up to the shift
+total. Bosses, investments, alternate recipes and the market are written the same way.
 
-An upgrade never declares when it triggers. `src/rules.lua` compares the sale,
-the shift multiplier or the machine before and after each hook, and remembers
-which upgrade set each rule field or added each recipe, so the card pop, the
-ledger entry and the board markers come for free. Each upgrade is credited
-with its own change in slot order, and the credits add up to the shift total.
+## Balance
+
+`lovec . --bench` measures the quota curve in three parts, and fails if the curve stops fitting:
+
+1. **The calculator is right.** `tests/plan.lua` works out what a perfectly balanced line costs
+   in watts and ore. Four real lines are built and simulated, and their revenue and power match
+   the calculator exactly.
+2. **Doing nothing gets you nowhere.** Real runs on 10 seeds that never shop, just smelting and
+   pressing every ore port into the depot, clear 1 to 3 contracts (median 2).
+3. **Reference players.** A model run per style of player: it follows the land the contracts
+   hand out, buys blueprints in a set order, spends the rest on power and on the value of
+   whatever it sold most of, and picks the better of the two markets offered. The calculator
+   then finds the best product mix for each contract. Module slots are the one judgement call: a
+   multiplier per contract, ×4 by the end for a solid player and ×8 for a strong one.
+
+| Contract | Quota | Lazy | Solid | Strong |
+|---|---|---|---|---|
+| 1 | $120 | 0.1 | 0.1 | 0.1 |
+| 3 | $1,500 | 1.3 | 0.5 | 0.3 |
+| 5 | $12K | missed | 0.8 | 0.3 |
+| 7 | $75K | missed | 1.0 | 0.3 |
+| 9 | $400K | missed | 1.6 | 0.5 |
+| 11 | $1.3M | missed | 1.5 | 0.4 |
+| 12 | $2.2M | missed | 2.8 | 0.5 |
+
+Shifts of the 3 each quota takes. A **lazy** run (no blueprints, no modules) dies in the second
+sector. A **solid** run (depth first, then investments) clears all 12, with the last one tight. A
+**strong** run clears everything in one shift and goes on into endless mode, where the quota
+doubles every contract. The bench fails unless solid clears all 12 and lazy does not.
 
 ## Status
 
-Prototype. Quotas are tuned for the first sector only; later sectors are a
-first guess. No audio, no saved runs, no meta-progression. Art is placeholder.
+Version 1.0, on the `v1-overhaul` branch. No music, no difficulty levels, no alternative
+starting setups and no permanent unlocks: those are for after 1.0. Art is placeholder.

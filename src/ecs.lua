@@ -9,7 +9,15 @@ local World = {}
 World.__index = World
 
 function ECS.world()
-  return setmetatable({ ents = {}, nextId = 1, cache = {}, systems = {} }, World)
+  return setmetatable({ ents = {}, nextId = 1, cache = {}, first = {}, systems = {} }, World)
+end
+
+-- Forget the cached queries this entity could be part of. Items come and go
+-- every tick; the building lists should survive that.
+local function invalidate(self, e)
+  for key in pairs(self.cache) do
+    if e[self.first[key]] ~= nil then self.cache[key] = nil end
+  end
 end
 
 function World:spawn(e)
@@ -17,7 +25,7 @@ function World:spawn(e)
   e.id = self.nextId
   self.nextId = self.nextId + 1
   self.ents[e.id] = e
-  self.cache = {}
+  invalidate(self, e)
   return e
 end
 
@@ -25,7 +33,7 @@ function World:despawn(e)
   if self.ents[e.id] ~= e then return end
   self.ents[e.id] = nil
   e.dead = true
-  self.cache = {}
+  invalidate(self, e)
 end
 
 -- Add / replace / remove (v = nil) a component after spawn.
@@ -49,6 +57,7 @@ function World:query(a, b, c)
   end
   table.sort(list, byId)
   self.cache[key] = list
+  self.first[key] = a
   return list
 end
 

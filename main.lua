@@ -1,14 +1,17 @@
 -- QUOTA - a factory roguelite.
 --   love .            play
 --   lovec . --test    run the headless simulation tests
---   lovec . --bench   print revenue of reference layouts (for tuning quotas)
+--   lovec . --bench   check the quota curve against reference factories
+--   lovec . --sheet   save every machine sprite to sheet.png
+--   lovec . --audio   render the music and ambience to WAV files
 
 local flags = {}
 for _, a in ipairs(arg or {}) do flags[a] = true end
 
-if flags['--test'] or flags['--bench'] then
+if flags['--test'] or flags['--bench'] or flags['--sheet'] or flags['--audio'] then
   function love.load()
-    local mod = flags['--test'] and 'tests.sim_test' or 'tests.bench'
+    local mod = (flags['--test'] and 'tests.sim_test') or (flags['--sheet'] and 'tools.sheet')
+      or (flags['--audio'] and 'tools.audio') or 'tests.bench'
     local ok, result = xpcall(function() return require(mod)() end, debug.traceback)
     if not ok then print(result) end
     love.event.quit((ok and result) and 0 or 1)
@@ -26,3 +29,4 @@ function love.mousereleased(x, y, b) App.mousereleased(x, y, b) end
 function love.mousemoved(x, y) App.mousemoved(x, y) end
 function love.wheelmoved(dx, dy) App.wheelmoved(dx, dy) end
 function love.keypressed(key) App.keypressed(key) end
+function love.quit() App.quit() end

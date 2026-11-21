@@ -15,7 +15,7 @@ function Links.feeds(F, x, y, d, depth)
     return b.dir == d
   elseif e.machine then
     return e.slot ~= nil and b.dir == d
-  elseif e.splitter then
+  elseif e.splitter or e.filter then
     return d ~= (b.dir + 2) % 4
   elseif e.bridge then
     -- A bridge passes on whatever enters it from the far side.
