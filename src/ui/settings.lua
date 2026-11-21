@@ -18,31 +18,38 @@ local TRACK, STEP = X + 78, 6          -- slider: 11 stops, 6 px apart
 local LABEL = {
   crt = 'STRENGTH', scanlines = 'SCANLINES', glow = 'GLOW',
   vignette = 'DARK CORNERS', fringe = 'COLOUR FRINGE', bulge = 'BULGE',
-  sound = 'SOUND',
+  sound = 'SOUND', music = 'MUSIC', print = 'STRENGTH',
 }
+local FILTER = { print = 'PRINT', crt = 'CRT', off = 'OFF' }
 
--- The sound slider always works; the CRT ones need the filter.
+-- The volume sliders always work; the filter ones need the shaders.
 local function usable(key)
-  return key == 'sound' or Crt.ok
+  return key == 'sound' or key == 'music' or Crt.ok
 end
 
 local dragging = nil         -- key of the slider being dragged
-local focus = 'crt'          -- key of the slider the arrow keys move
+local focus = 'print'        -- key of the slider the arrow keys move
 
 -- The rows for the current mode, each with the y of its text, plus the
 -- panel's top and height (it grows with the number of rows).
 local function layout()
-  local rows = { { kind = 'slider', key = 'sound' }, { kind = 'mode' } }
-  if Settings.custom then
-    for _, part in ipairs(Settings.PARTS) do rows[#rows + 1] = { kind = 'slider', key = part } end
-  else
-    rows[#rows + 1] = { kind = 'slider', key = 'crt' }
+  local rows = { { kind = 'slider', key = 'sound' }, { kind = 'slider', key = 'music' }, { kind = 'filter' } }
+  if Settings.filter == 'print' then
+    rows[#rows + 1] = { kind = 'slider', key = 'print' }
+  elseif Settings.filter == 'crt' then
+    rows[#rows + 1] = { kind = 'mode' }
+    if Settings.custom then
+      for _, part in ipairs(Settings.PARTS) do rows[#rows + 1] = { kind = 'slider', key = part } end
+    else
+      rows[#rows + 1] = { kind = 'slider', key = 'crt' }
+    end
   end
   rows[#rows + 1] = { kind = 'fullscreen' }
   rows[#rows + 1] = { kind = 'integer' }
-  local h = 22 + #rows * ROWH + 20
+  local rowh = #rows > 9 and ROWH - 1 or ROWH     -- squeeze a long list onto the screen
+  local h = 22 + #rows * rowh + 20
   local y = math.floor((180 - h) / 2)
-  for i, row in ipairs(rows) do row.y = y + 22 + (i - 1) * ROWH end
+  for i, row in ipairs(rows) do row.y = y + 22 + (i - 1) * rowh end
   return rows, y, h
 end
 
@@ -115,8 +122,15 @@ function Panel.draw(app)
   UI.heading('SETTINGS', X + 6, y + 5, W - 12)
 
   for _, row in ipairs(rows) do
-    if row.kind == 'mode' then
-      UI.text('CRT FILTER', X + 8, row.y, Crt.ok and P.text or P.faint)
+    if row.kind == 'filter' then
+      UI.text('FILTER', X + 8, row.y, Crt.ok and P.text or P.faint)
+      if switch(FILTER[Settings.filter], row.y, false, 40, { disabled = not Crt.ok, color = P.blue }) then
+        Settings.set('filter', Settings.nextFilter())
+        dragging = nil
+        focus = Settings.filter == 'crt' and 'crt' or 'print'
+      end
+    elseif row.kind == 'mode' then
+      UI.text('CRT MODE', X + 8, row.y, Crt.ok and P.text or P.faint)
       if switch(Settings.custom and 'CUSTOM' or 'SIMPLE', row.y, Settings.custom, 40,
           { disabled = not Crt.ok, color = P.blue }) then
         Settings.setCustom(not Settings.custom)

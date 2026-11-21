@@ -86,14 +86,85 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 screen) {
 }
 ]]
 
+-- The print filter: the picture as if printed on paper. The ink plates sit a
+-- touch out of register (the red and blue drift a fraction of a pixel apart),
+-- the paper has a grain finer than a game pixel, and its edges yellow a
+-- little. Nothing moves.
+local PRINT = [[
+uniform vec2 size;
+uniform float scale;
+uniform float strength;
+
+vec3 sharp(Image tex, vec2 p) {
+  vec2 cell = floor(p);
+  vec2 f = fract(p) - 0.5;
+  vec2 inner = vec2(0.5 - 0.5 / scale);
+  f = (f - clamp(f, -inner, inner)) * scale + 0.5;
+  return Texel(tex, (cell + f) / size).rgb;
+}
+
+float hash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+             mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+vec4 effect(vec4 color, Image tex, vec2 uv, vec2 screen) {
+  vec2 p = uv * size;
+  // Out of register: the red plate a little right and down, the blue a
+  // little left. At most about a third of a game pixel.
+  vec2 off = vec2(0.34, 0.22) * strength;
+  vec3 col = vec3(sharp(tex, p + off).r, sharp(tex, p).g, sharp(tex, p - off * 0.6).b);
+
+  // Where the ink is dark it sits a touch heavier.
+  float luma = dot(col, vec3(0.299, 0.587, 0.114));
+  col *= 1.0 - 0.06 * strength * (1.0 - luma);
+
+  // Paper grain: fine speckle at screen resolution, and longer fibres.
+  vec2 sp = p * scale;
+  float speck = hash(floor(sp)) - 0.5;
+  float fibre = noise(sp * vec2(0.08, 0.5)) - 0.5;
+  col *= 1.0 + strength * (0.07 * speck + 0.06 * fibre);
+
+  // The edges of the sheet, faintly yellowed.
+  vec2 c = uv * 2.0 - 1.0;
+  float edge = smoothstep(0.6, 2.0, dot(c, c));
+  col = mix(col, col * vec3(1.0, 0.93, 0.8), edge * strength * 0.5);
+
+  return vec4(col, 1.0) * color;
+}
+]]
+
 function Crt.load()
   local ok, shader = pcall(love.graphics.newShader, CODE)
   Crt.ok = ok
   if ok then
     Crt.shader = shader
+    local pok, print2 = pcall(love.graphics.newShader, PRINT)
+    if pok then Crt.print = print2 else print('print filter unavailable: ' .. tostring(print2)) end
   else
     print('CRT filter unavailable: ' .. tostring(shader))
   end
+end
+
+-- Draw `canvas` through the print filter, `strength` 0..1.
+function Crt.drawPrint(canvas, x, y, s, strength)
+  local shader = Crt.print
+  shader:send('size', { canvas:getDimensions() })
+  shader:send('scale', s)
+  shader:send('strength', strength)
+  canvas:setFilter('linear', 'linear')
+  love.graphics.setShader(shader)
+  love.graphics.draw(canvas, x, y, 0, s, s)
+  love.graphics.setShader()
+  canvas:setFilter('nearest', 'nearest')
 end
 
 -- Where a point of the picture rectangle (u, v in 0..1) reads from the

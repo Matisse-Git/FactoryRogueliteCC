@@ -49,6 +49,11 @@ return function(App)
   end
 
   local function shot(name)
+    -- A stamp still coming down is put straight on the paper.
+    if App.state == 'game' and App.g and App.g.stampT and App.g.stampT < 1 then
+      Game.settleStamp(App)
+      coroutine.yield()
+    end
     love.graphics.setCanvas(out)
     love.graphics.clear(0, 0, 0, 1)
     love.graphics.setColor(1, 1, 1, 1)
@@ -348,6 +353,13 @@ return function(App)
     App.move(cell(smelter.pos.x, smelter.pos.y))
     wait(2)
     shot('04_run')
+    local coins = 0
+    for _, q in ipairs(App.g.parts.list) do if q.shape then coins = coins + 1 end end
+    expect('sales throw coins', coins > 0)
+    require('src.ui.particles').update(App.g.parts, 0.2)
+    App.move(300, 20)
+    wait(1)
+    shot('04b_coins')
     App.g.paused = false
 
     App.keypressed('return')
@@ -690,7 +702,9 @@ return function(App)
 
     ---------------------------------------------------------- settings panel
     expect('crt: the filter is available', Crt.ok)
-    expect('settings: defaults', Settings.crt == 50 and Settings.integer)
+    expect('settings: defaults', Settings.crt == 50 and Settings.integer
+      and Settings.filter == 'print' and Settings.print == 50 and Settings.music == 50)
+    expect('settings: the print filter leaves the mouse alone', Crt.off(App.levels()))
     expect('a run that ended leaves nothing to continue', not App.hasSave())
     click(Title.at.records)
     expect('title: RECORDS opens the records', App.overlay == 'records' and Records.contract >= 12 and Records.wins == 1)
@@ -709,7 +723,10 @@ return function(App)
     App.move(300, 20)
     wait(2)
     shot('19_settings')
+    crtShot('19b_print_filter', 1280, 720)
 
+    click(Panel.at('filter'))
+    expect('filter: the switch goes from print to CRT', Settings.filter == 'crt' and Panel.stop(0, 'crt') ~= nil)
     click(Panel.stop(100))
     expect('slider: a click sets the strength', Settings.crt == 100)
     local sx, sy = Panel.stop(100)
@@ -747,7 +764,9 @@ return function(App)
       Settings.custom and Settings.bulge == 100 and Settings.scanlines == 0)
     for _, part in ipairs(Settings.PARTS) do click(Panel.stop(0, part)) end
     expect('custom: every part at 0 turns the filter off', Crt.off(App.levels()))
+    expect('custom: the long panel fits on the screen', select(2, Panel.at('integer')) < 170)
     click(Panel.at('mode'))
+    click(Panel.stop(40))         -- the hover picks which slider the arrows move
 
     for _ = 1, 6 do App.keypressed('left') end
     expect('slider: 0 turns the filter off', Settings.crt == 0 and Crt.off(App.levels()))
@@ -852,6 +871,9 @@ return function(App)
     wait(2)
     crtShot('26_crt_custom_scanlines_only', 1280, 720)
     Settings.setCustom(false)
+    Settings.set('filter', 'print')
+    wait(2)
+    crtShot('27a_print_run', 1280, 720)
     App.g.paused = false
     Game.fastForward(App)
 

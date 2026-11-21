@@ -402,6 +402,18 @@ local function stepSim(app)
           x = ev.x, y = ev.y, value = ev.value, age = 0, tick = F.shift.tick,
           best = best, color = color,
         }
+        -- Money hops out of the sale: coins, or banknotes for dearer goods.
+        if ev.value > 0.005 then
+          local n = ev.value >= 500 and 3 or (ev.value >= 50 and 2 or 1)
+          local shape = ev.value >= 50 and 'note' or 'coin'
+          for _ = 1, n do
+            Particles.add(g.parts, {
+              x = ev.x + 0.3 + 0.4 * love.math.random(), y = ev.y + 0.3,
+              vx = (love.math.random() - 0.5) * 2.4, vy = -3 - love.math.random() * 1.5,
+              grav = 13, life = 0.6, shape = shape, fade = 'late',
+            })
+          end
+        end
       end
       -- Dearer sales ring higher.
       Sfx.play('sale', 0.8 + 0.1 * math.min(8, math.log10(1 + ev.value)))
@@ -508,9 +520,41 @@ function Game.lifeContext(app)
   }
 end
 
+-- A rubber stamp on the report or the final papers comes down hard: it
+-- starts big, lands with a thunk, and the desk jolts.
+local SLAM = 0.14
+local SHAKE = 0.22
+local function updateStamp(g, dt)
+  local want = (g.mode == 'summary' and revealDone(g)) or g.mode == 'win' or g.mode == 'over'
+  if not want then
+    g.stampT, g.stamped, g.stampGrow = nil, nil, 1
+  else
+    g.stampT = g.stampT and g.stampT + dt or 0
+    local t = g.stampT
+    g.stampGrow = t < SLAM and 1 + 2.2 * (1 - t / SLAM) ^ 2 or 1
+    if t >= SLAM and not g.stamped then
+      g.stamped = true
+      g.shake = SHAKE
+      Sfx.play('thunk')
+      Sfx.play('slap', 0.6)
+    end
+  end
+  if g.shake then
+    g.shake = g.shake - dt
+    if g.shake <= 0 then g.shake = nil end
+  end
+end
+
+-- Puts a stamp straight down, without the slam (for the screenshot script).
+function Game.settleStamp(app)
+  local g = app.g
+  if g.stampT then g.stampT, g.stamped, g.stampGrow, g.shake = 10, true, 1, nil end
+end
+
 function Game.update(app, dt)
   local g = app.g
   Fx.update(g.fx, dt)
+  updateStamp(g, dt)
   Particles.update(g.parts, dt)
   updateClearing(g, dt)
   updateSmoke(app, dt)
@@ -942,10 +986,15 @@ local function drawBoard(app)
     local x = px + T / 2 - Font.width(label) / 2
     x = max(VX + 1, min(x, VX + VW - Font.width(label) - 2))
     -- They rise, or sink where the top bar would swallow them.
-    local y = py - 6 - p.age * POPUP_RISE
-    if py - VY < 2 * T then y = py + T + 1 + p.age * POPUP_RISE end
-    UI.text(label, x + 1, y + 1, P.dark)
-    UI.text(label, x, y, color)
+    local y = floor(py - 7 - p.age * POPUP_RISE)
+    if py - VY < 2 * T then y = floor(py + T + 2 + p.age * POPUP_RISE) end
+    -- A little price tag.
+    local w = Font.width(label) + 4
+    local a = min(1, (POPUP_LIFE - p.age) / 0.15)
+    UI.rect(x - 1, y - 1, w, 8, P.dark, 0.35 * a)
+    UI.rect(x - 2, y - 2, w, 8, P.paperL, a)
+    UI.color(color, a)
+    Font.print(label, x, y)
   end
 
   love.graphics.setScissor()
@@ -1488,6 +1537,12 @@ end
 
 function Game.draw(app)
   local g = app.g
+  love.graphics.push()
+  if g.shake then
+    -- The jolt dies away: a couple of pixels, then one, then none.
+    local a = math.ceil(g.shake / SHAKE * 2)
+    love.graphics.translate(love.math.random(-a, a), love.math.random(0, a))
+  end
   drawBoard(app)
   drawTopBar(app)
   drawSidebar(app)
@@ -1515,6 +1570,7 @@ function Game.draw(app)
   elseif UI.tip and not g.picker then
     UI.drawTip(UI.tip, UI.mx, UI.my)
   end
+  love.graphics.pop()
 end
 
 ---------------------------------------------------------------- input

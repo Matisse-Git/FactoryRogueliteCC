@@ -245,7 +245,10 @@ function App.present(w, h)
   local s, ox, oy = App.layout(w, h)
   local levels = App.levels()
   love.graphics.setColor(1, 1, 1, 1)
-  if Crt.ok and (s ~= math.floor(s) or not Crt.off(levels)) then
+  local print = Settings.filter == 'print' and Settings.print / 100 or 0
+  if Crt.print and print > 0 then
+    Crt.drawPrint(App.canvas, ox, oy, s, print)
+  elseif Crt.ok and (s ~= math.floor(s) or not Crt.off(levels)) then
     Crt.draw(App.canvas, ox, oy, s, levels)
   else
     love.graphics.draw(App.canvas, ox, oy, 0, s, s)

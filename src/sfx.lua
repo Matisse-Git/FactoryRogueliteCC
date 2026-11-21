@@ -57,6 +57,8 @@ local DEFS = {
   land   = { 'tri',    0.30, { { 392, 0.07 }, { 523, 0.07 }, { 659, 0.14 } } },
   boss   = { 'square', 0.24, { { 98, 0.18 }, { 92, 0.18 }, { 87, 0.3 } } },
   error  = { 'square', 0.18, { { 150, 0.08 } }, gap = 0.1 },
+  thunk  = { 'sine',   0.60, { { 120, 0.18, 38 } } },     -- a rubber stamp comes down
+  slap   = { 'noise',  0.22, { { 0, 0.05 } } },
 }
 
 function Sfx.load()
