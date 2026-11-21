@@ -70,6 +70,15 @@ return function(App)
     wait(1)
   end
 
+  -- The contract's papers come out once new land has been cleared.
+  local function clickIntro()
+    for _ = 1, 4000 do
+      if not (App.g and App.g.clear) then break end
+      wait(1)
+    end
+    click(Game.at.intro)
+  end
+
   local function expect(name, cond)
     print((cond and '  ok    ' or '  FAIL  ') .. name)
     if not cond then failed = true end
@@ -153,7 +162,7 @@ return function(App)
     shot('02_intro')
 
     ---------------------------------------------------------- building
-    click(Game.at.intro)
+    clickIntro()
     expect('intro: START enters build mode', App.g.mode == 'build')
     expect('the run opens on the depot, close up', App.g.cam.T == 16 and Game.cellAt(App.g, cell(App.run.map.depot[1][1], App.run.map.depot[1][2])) ~= nil)
 
@@ -446,7 +455,18 @@ return function(App)
     expect('land: clicking a free slot places it',
       App.g.mode == 'intro' and App.run.map.count == 2 and App.run.map:has(free[2][1], free[2][2]))
     expect('land: its ports are on the board', #f.world:query('port') == ports + #plot.ports)
-    click(Game.at.intro)
+    expect('land: the new plot is cleared in a sweep', App.g.clear ~= nil)
+    for _ = 1, 2000 do
+      if not App.g.clear or App.g.clear.t > 0.5 then break end
+      wait(1)
+    end
+    shot('08a2_clearing')
+    for _ = 1, 4000 do
+      if not App.g.clear then break end
+      wait(1)
+    end
+    expect('land: and the sweep finishes', App.g.clear == nil)
+    clickIntro()
     App.wheelmoved(0, -1)
     App.move(300, 100)
     wait(2)
@@ -466,7 +486,7 @@ return function(App)
     wait(2)
     expect('a boss contract announces its twist', App.g.mode == 'intro' and App.run:contract().boss ~= nil)
     shot('08_boss_intro')
-    click(Game.at.intro)
+    clickIntro()
     Game.setZoom(App.g, 8, 0, 0)
     Game.startShift(App)
     App.g.acc = 10.5
@@ -635,7 +655,7 @@ return function(App)
     takeLand()
     wait(2)
     shot('13c_endless_intro')
-    click(Game.at.intro)
+    clickIntro()
 
     -- Lose on purpose: burn the remaining shifts with an empty board.
     clearBoard()
@@ -738,7 +758,7 @@ return function(App)
     App.seed = 4242
     App.keypressed('return')
     wait(2)
-    click(Game.at.intro)
+    clickIntro()
     f = F()
     ox, oy = home()
     App.g.tool = 'belt'
@@ -883,7 +903,7 @@ return function(App)
     click(Shop.at.next)
     expect('continue: and the run goes on', App.state == 'game' and App.run.index == 2 and App.g.mode == 'annex')
     takeLand()
-    click(Game.at.intro)
+    clickIntro()
 
     ---------------------------------------------------------- abandoning
     App.keypressed('escape')

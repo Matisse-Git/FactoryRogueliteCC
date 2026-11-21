@@ -6,6 +6,7 @@ local P = require 'src.gfx.palette'
 local Sprites = require 'src.gfx.sprites'
 local UI = require 'src.ui.ui'
 local Map = require 'src.map'
+local Terrain = require 'src.gfx.terrain'
 
 local Land = {}
 
@@ -28,14 +29,18 @@ end
 -- plot at pixel (ox, oy), tile size T (16 or 8).
 function Land.draw(plot, ox, oy, T, alpha)
   local S = Sprites.set[T]
-  for y = 0, Map.PH - 1 do
-    for x = 0, Map.PW - 1 do UI.sprite(S.floor, ox + x * T, oy + y * T, 0, alpha) end
-  end
+  -- Fresh concrete in slabs of 2x2 tiles, with a kerb round it.
+  local w, h = Map.PW * T, Map.PH * T
+  UI.rect(ox, oy, w, h, P.concrete, alpha)
+  for k = 2, Map.PW - 1, 2 do UI.rect(ox + k * T - 1, oy, 1, h, P.seam, alpha) end
+  for k = 2, Map.PH - 1, 2 do UI.rect(ox, oy + k * T - 1, w, 1, P.seam, alpha) end
+  UI.frame(ox, oy, w, h, P.kerb, alpha)
+  UI.frame(ox + 1, oy + 1, w - 2, h - 2, P.kerb, (alpha or 1) * 0.5)
   for _, p in ipairs(plot.pads or {}) do UI.sprite(S.pad, ox + p.x * T, oy + p.y * T, 0, alpha) end
   for _, r in ipairs(plot.rocks) do UI.sprite(S.machine.rock, ox + r.x * T, oy + r.y * T, 0, alpha) end
   if plot.node then UI.sprite(S.machine.node, ox + plot.node.x * T, oy + plot.node.y * T, 0, alpha) end
   if plot.depot then
-    for _, t in ipairs(Map.DEPOT) do UI.sprite(S.machine.export, ox + t[1] * T, oy + t[2] * T, 0, alpha) end
+    UI.sprite(Terrain.depot(T), ox + Map.DEPOT[1][1] * T, oy + Map.DEPOT[1][2] * T, 0, alpha)
   end
   for _, p in ipairs(plot.ports) do
     local x, y = ox + p.x * T, oy + p.y * T

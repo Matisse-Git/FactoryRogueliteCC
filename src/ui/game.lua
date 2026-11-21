@@ -11,6 +11,7 @@ local Sprites = require 'src.gfx.sprites'
 local Terrain = require 'src.gfx.terrain'
 local UI = require 'src.ui.ui'
 local Fx = require 'src.ui.fx'
+local Particles = require 'src.ui.particles'
 local Book = require 'src.ui.book'
 local Fmt = require 'src.fmt'
 local Sfx = require 'src.sfx'
@@ -41,6 +42,7 @@ local COUNT = 0.3            -- summary: seconds the total takes to count up
 local STAMP = 0.12           -- summary: seconds a new line stays highlighted
 local POPUP_LIFE = 0.5       -- sale popups: seconds on screen
 local POPUP_RISE = 32        -- sale popups: pixels per second
+local CLEAR_TIME = 1.1       -- seconds the new land takes to clear
 local POPUP_MERGE = 0.2      -- sale popups: a sale this soon after the last
                              -- joins its popup, so popups never pile up
 local floor, min, max = math.floor, math.min, math.max
@@ -110,6 +112,8 @@ function Game.enter(app)
     popups = {}, summary = nil, drag = nil, book = false,
     stats = old and old.stats or false,   -- U: utilisation on every machine
     fx = Fx.new(),      -- card pops and tile flashes
+    parts = old and old.run == run and old.parts or Particles.new(),   -- dust, smoke, leaves
+    clear = nil,        -- { sx, sy, t }: new land being cleared
     reveal = nil,       -- summary playback, see finishShift
     lit = {},           -- mods changing a machine on the board this frame
     hoverMod = nil,     -- the upgrade whose card is under the mouse
@@ -446,9 +450,30 @@ function Game.goOn(app)
   app.save()
 end
 
+-- New land is cleared in a sweep from the left, throwing up dust and leaves.
+local DUST = { 'soilL', 'sandD', 'soil', 'leafL', 'grassL' }
+local function updateClearing(g, dt)
+  local c = g.clear
+  if not c then return end
+  c.t = c.t + dt
+  if c.t >= CLEAR_TIME then g.clear = nil return end
+  local line = c.sx * Map.PW + Map.PW * c.t / CLEAR_TIME
+  local rnd = love.math.random
+  for _ = 1, floor(90 * dt + rnd()) do
+    Particles.add(g.parts, {
+      x = line + rnd() * 0.4, y = c.sy * Map.PH + rnd() * Map.PH,
+      vx = 0.4 + rnd() * 1.2, vy = -0.3 - rnd() * 0.9, grav = 1.2, drag = 2,
+      life = 0.5 + rnd() * 0.6, size = 2 + rnd() * 2, grow = 2,
+      color = P[DUST[floor(rnd() * #DUST) + 1]],
+    })
+  end
+end
+
 function Game.update(app, dt)
   local g = app.g
   Fx.update(g.fx, dt)
+  Particles.update(g.parts, dt)
+  updateClearing(g, dt)
   if g.mode == 'summary' then advanceReveal(g, dt) end
   if g.mode == 'run' and not g.paused then
     g.acc = g.acc + dt * TPS * g.speed
@@ -600,7 +625,18 @@ local function drawBoard(app)
   -- The ground: grass, concrete and the scenery around the site, baked.
   do
     local ox, oy = tilePos(g, -Terrain.MARGIN, -Terrain.MARGIN)
-    UI.sprite(Terrain.image(run, T), ox, oy)
+    local img, prev = Terrain.image(run, T)
+    UI.sprite(img, ox, oy)
+    -- New land: the wild ground it was, swept away from the left.
+    local c = g.clear
+    if c and prev then
+      local px, py = tilePos(g, c.sx * Map.PW, c.sy * Map.PH)
+      local done = floor(Map.PW * T * c.t / CLEAR_TIME)
+      local sx, sy, sw, sh = love.graphics.getScissor()
+      love.graphics.intersectScissor(px + done, py, Map.PW * T - done, Map.PH * T)
+      UI.sprite(prev, ox, oy)
+      love.graphics.setScissor(sx, sy, sw, sh)
+    end
     -- Light glinting on the river.
     if big then
       g.layout = g.layout or Terrain.layout(run.seed or 1)
@@ -755,6 +791,7 @@ local function drawBoard(app)
     end
   end
 
+  Particles.draw(g.parts, VX - cam.x, VY - cam.y, T)
   Fx.drawFlashes(g.fx, VX - cam.x, VY - cam.y, T)
 
   local overlay = g.mode == 'intro' or g.mode == 'summary' or g.mode == 'over' or g.mode == 'win'
@@ -1380,7 +1417,9 @@ function Game.draw(app)
     UI.rect(VX, VY + 10, VW, 1, P.dark)
     UI.textCenter('NEW LAND: CLICK A FREE PLOT TO PLACE IT', CX, VY + 3, P.cyan)
   end
-  if g.mode == 'intro' then drawIntro(app)
+  if g.mode == 'intro' then
+    -- The contract's papers come out once the new land is cleared.
+    if not g.clear then drawIntro(app) end
   elseif g.mode == 'summary' then drawSummary(app)
   elseif g.mode == 'over' then drawEnd(app, false)
   elseif g.mode == 'win' then drawEnd(app, true) end
@@ -1418,6 +1457,7 @@ function Game.press(app, x, y, b)
     if app.run:annex(sx, sy) then
       -- Back to work, looking at the new land.
       g.mode = 'intro'
+      g.clear = { sx = sx, sy = sy, t = 0 }
       setZoom(g, 16, sx * Map.PW + Map.PW / 2, sy * Map.PH + Map.PH / 2)
       Sfx.play(app.run:contract().boss and 'boss' or 'land')
       app.save()

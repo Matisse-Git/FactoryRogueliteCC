@@ -11,6 +11,7 @@ local ffi = require 'ffi'
 local bit = require 'bit'
 local P = require 'src.gfx.palette'
 local Map = require 'src.map'
+local Items = require 'src.data.items'
 
 local Terrain = {}
 
@@ -202,6 +203,61 @@ local function outsideColour(L, kind, u, v, s, step)
   return grass(u, v, s, false)
 end
 
+---------------------------------------------------------------- deposits
+
+-- Where a port stands, the concrete stops: a patch of its raw material's
+-- ground, so a plot's resources show at a glance.
+local DEPOSIT_RADIUS = 19
+
+local function bytes(c) return { floor(c[1] * 255 + 0.5), floor(c[2] * 255 + 0.5), floor(c[3] * 255 + 0.5) } end
+
+local depositColours = {}
+local function depositOf(item)
+  if depositColours[item] then return depositColours[item] end
+  local mat = Items[item] and Items[item].mat or 'iron'
+  local m, mD, mL = P[mat], P[mat .. 'D'] or P[mat], P[mat .. 'L'] or P[mat]
+  local d = {
+    base = bytes(P.mix(P.soilD, mD, 0.45)),
+    mid = bytes(P.mix(P.soil, m, 0.4)),
+    edge = bytes(P.mix(P.soilD, P.dark, 0.35)),
+    speck = bytes(mL),
+    pool = item == 'crude' and bytes(P.tarD) or nil,
+  }
+  depositColours[item] = d
+  return d
+end
+
+local function ports(run)
+  local list = {}
+  local F = run.factory
+  if not F then return list end
+  for _, e in ipairs(F.world:query('port')) do
+    list[#list + 1] = { x = e.pos.x * 16 + 8, y = e.pos.y * 16 + 8, item = e.port.item, h = hash(e.pos.x, e.pos.y, 3) * 6.28 }
+  end
+  return list
+end
+
+-- The deposit colour at world pixel (u, v), or nil.
+local function deposit(list, u, v, s)
+  for i = 1, #list do
+    local p = list[i]
+    local dx, dy = u - p.x, v - p.y
+    local d2 = dx * dx + dy * dy
+    if d2 < (DEPOSIT_RADIUS + 4) ^ 2 then
+      local a = atan2(dy, dx)
+      local rr = DEPOSIT_RADIUS + 2.5 * sin(a * 3 + p.h) + 1.5 * sin(a * 7 + p.h * 2)
+      local d = sqrt(d2)
+      if d < rr then
+        local c = depositOf(p.item)
+        if d > rr - 1.5 then return c.edge end
+        if c.pool and noise(u / 7, v / 7, s + 60) > 0.66 then return c.pool end
+        if hash(u, v, s + 61) < 0.07 then return c.speck end
+        return noise(u / 5, v / 5, s + 62) < 0.45 and c.base or c.mid
+      end
+    end
+  end
+end
+
 ---------------------------------------------------------------- objects
 
 -- Trees, bushes and stones, as { kind, x, y, r, seed } in world pixels.
@@ -250,6 +306,7 @@ local function bake(run, T)
   local hard = ffi.new('uint8_t[?]', IW * IH)   -- 1 where objects may not paint
   local owned = function(tx, ty) return map:owned(tx, ty) end
   local F = run.factory
+  local deposits = ports(run)
 
   local function put(i, c)
     px[i * 4], px[i * 4 + 1], px[i * 4 + 2], px[i * 4 + 3] = c[1], c[2], c[3], 255
@@ -263,6 +320,12 @@ local function bake(run, T)
       local name
       if tx >= 0 and ty >= 0 and tx < W and ty < H then
         if map:owned(tx, ty) then
+          local dep = deposit(deposits, u, v, s)
+          if dep then
+            hard[y * IW + x] = 1
+            put(y * IW + x, dep)
+            goto continue
+          end
           name = concrete(u, v, s, step, owned, tx, ty, F and F:floorAt(tx, ty) == 'pad')
           hard[y * IW + x] = 1
         else
@@ -274,6 +337,7 @@ local function bake(run, T)
         if k == 'road' or k == 'water' then hard[y * IW + x] = 1 end
       end
       put(y * IW + x, C[name])
+      ::continue::
     end
   end
 
@@ -355,20 +419,59 @@ local function bake(run, T)
 end
 
 -- The baked ground for a run at tile size T, rebaked when the land changes.
+-- The bake it replaced is kept for a moment, for the clearing effect.
 local cache = {}
 function Terrain.image(run, T)
   local key = tostring(run) .. ':' .. T .. ':' .. #run.map.order
   local c = cache[T]
   if not c or c.key ~= key then
-    c = { key = key, img = bake(run, T) }
+    local prev = c and c.run == run and c.img or nil
+    c = { key = key, img = bake(run, T), prev = prev, run = run }
     cache[T] = c
   end
-  return c.img
+  return c.img, c.prev
 end
 
 -- Forget every bake (a new run, a loaded one).
 function Terrain.reset()
   cache = {}
+end
+
+---------------------------------------------------------------- boulders
+
+-- Rock on your land: a few boulders and their shadow, on a clear background.
+local boulderCache = {}
+function Terrain.boulder(T)
+  if boulderCache[T] then return boulderCache[T] end
+  local data = love.image.newImageData(T, T)
+  local step = 16 / T
+  local stones = { { 7, 8, 5.2, 4.2 }, { 11, 10.5, 3.2, 2.6 }, { 4.2, 11, 2.6, 2.1 } }
+  for y = 0, T - 1 do
+    for x = 0, T - 1 do
+      local u, v = (x + 0.5) * step, (y + 0.5) * step
+      local c, a
+      for _, st in ipairs(stones) do       -- shadows
+        local ex, ey = (u - st[1] - 1.5) / st[3], (v - st[2] - 1.8) / st[4]
+        if ex * ex + ey * ey < 1 then c, a = C.shadow, 0.35 end
+      end
+      for _, st in ipairs(stones) do
+        local ex, ey = (u - st[1]) / st[3], (v - st[2]) / st[4]
+        local d = ex * ex + ey * ey
+        if d < 1 then
+          a = 1
+          if d > 0.7 then c = C.stoneD
+          elseif ex + ey < -0.5 then c = C.stoneL
+          elseif ex + ey > 0.55 then c = C.stoneD
+          else c = (hash(floor(u), floor(v), 5) < 0.12) and C.stoneD or C.stone end
+        end
+      end
+      if c then data:setPixel(x, y, c[1] / 255, c[2] / 255, c[3] / 255, a) end
+    end
+  end
+  local img = love.graphics.newImage(data)
+  img:setFilter('nearest', 'nearest')
+  boulderCache[T] = img
+  return img
 end
 
 ---------------------------------------------------------------- the depot

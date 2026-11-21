@@ -554,36 +554,6 @@ local BODY = {   -- body, highlight, shade
   node         = { '1f3f66', '32609a', '12263f' },
 }
 
-local RUBBLE = {
-  '................',
-  '................',
-  '......0000......',
-  '....00233200....',
-  '...0233332320...',
-  '..023343322220..',
-  '..0233332222210.',
-  '.02332222221110.',
-  '.0222220022110..',
-  '.022220330210...',
-  '..0000233320....',
-  '....02333220....',
-  '....0222210.....',
-  '.....00000......',
-  '................',
-  '................',
-}
-
-local RUBBLE_SMALL = {
-  '........',
-  '..0000..',
-  '.034320.',
-  '03433220',
-  '03322210',
-  '.022210.',
-  '..0000..',
-  '........',
-}
-
 -- A bevelled machine body with an optional icon on top, 16 or 8 px.
 local function chassis(kind, size)
   local body, light, shade = P.hex(BODY[kind][1]), P.hex(BODY[kind][2]), P.hex(BODY[kind][3])
@@ -758,7 +728,7 @@ local function buildSet(size)
   set.inlet = inletTile(size)
   for _, kind in ipairs(MACHINES) do set.machine[kind] = chassis(kind, size) end
   set.machine.bridge = bridgeTile(size)
-  set.machine.rubble = fromRows(size == 16 and RUBBLE or RUBBLE_SMALL)
+  set.machine.rubble = require('src.gfx.terrain').boulder(size)
   set.machine.rock = set.machine.rubble
   set.machine.belt = set.belt[1]
   set.crate = fromRows(size == 16 and CRATE or CRATE_SMALL)
