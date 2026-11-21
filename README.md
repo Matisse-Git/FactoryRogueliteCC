@@ -182,8 +182,9 @@ A shift that was cut short is simply run again. The save is removed when the run
 - **Music**: music volume, 0 to 100. One theme in two arrangements: a relaxed one while you
   build, a driving one while a shift runs, crossfading between them.
 - **Filter**: Print (the default), CRT or Off.
-  - **Print**: the picture as a printed page: paper grain, the ink plates a fraction of a pixel
-    out of register, dark ink a touch heavier, faintly yellowed edges. Like the CRT filter it
+  - **Print**: the picture as a printed page: paper grain, the colour inks slipped against the
+    black ink (a sliver of bare paper opens beside outlines and text, and the colour runs under
+    them, as on a cheap 1950s colour print), dark ink a touch heavier, faintly yellowed edges. Like the CRT filter it
     has a **Simple** mode (one strength slider, 50 by default) and a **Custom** mode with one
     slider per part: paper grain, misregister, ink weight, yellow edges. Each filter keeps its
     own mode and values.

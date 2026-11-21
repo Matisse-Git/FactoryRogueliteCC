@@ -895,6 +895,44 @@ return function(App)
     App.g.paused = true
     App.move(cell(ox + 2, oy + 2))
     wait(2)
+
+    -- The print filter with nothing slipped and nothing added gives back the
+    -- picture exactly: splitting it into black and colour plates loses nothing.
+    do
+      local w, h = App.W * 3, App.H * 3
+      local plain, printed = love.graphics.newCanvas(w, h), love.graphics.newCanvas(w, h)
+      love.graphics.setCanvas(plain)
+      love.graphics.clear(0, 0, 0, 1)
+      love.graphics.setColor(1, 1, 1, 1)
+      love.graphics.draw(App.canvas, 0, 0, 0, 3, 3)
+      love.graphics.setCanvas(printed)
+      love.graphics.clear(0, 0, 0, 1)
+      Crt.drawPrint(App.canvas, 0, 0, 3, { grain = 0, register = 0, ink = 0, edges = 0 })
+      love.graphics.setCanvas()
+      local a, b = plain:newImageData(), printed:newImageData()
+      local worst = 0
+      for y = 1, h - 1, 3 do
+        for x = 1, w - 1, 3 do
+          local r1, g1, b1 = a:getPixel(x, y)
+          local r2, g2, b2 = b:getPixel(x, y)
+          worst = math.max(worst, math.abs(r1 - r2), math.abs(g1 - g2), math.abs(b1 - b2))
+        end
+      end
+      expect('print: with nothing slipped the plates give back the picture (worst ' .. math.floor(worst * 255 + 0.5) .. '/255)',
+        worst <= 2 / 255)
+      plain:release()
+      printed:release()
+    end
+    -- And slipped all the way, on its own.
+    Settings.set('filter', 'print')
+    Settings.setCustom(true, 'print')
+    Settings.grain, Settings.register, Settings.ink, Settings.edges = 0, 100, 0, 0
+    crtShot('27b_print_misregister_100', 1280, 720)
+    Settings.register = 50
+    crtShot('27c_print_misregister_50', 1280, 720)
+    Settings.setCustom(false, 'print')
+    Settings.set('filter', 'crt')
+
     crtShot('21_crt_100', 1280, 720)
     Settings.set('crt', 50)
     wait(2)

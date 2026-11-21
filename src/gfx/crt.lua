@@ -86,10 +86,15 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 screen) {
 }
 ]]
 
--- The print filter: the picture as if printed on paper. The ink plates sit a
--- touch out of register (the red and blue drift a fraction of a pixel apart),
--- the paper has a grain finer than a game pixel, and its edges yellow a
--- little. Nothing moves.
+-- The print filter: the picture as if printed on paper. Nothing moves.
+--   misregister  the picture is split into two plates, as a cheap colour
+--                print is: the black ink (outlines, text, shadows) and the
+--                colour inks. The colour plate slips right and down against
+--                the black, by whole screen pixels: a sliver of bare paper
+--                opens beside the black ink and the colour runs under it.
+--   ink          dark ink sits a touch heavier
+--   grain        paper grain finer than a game pixel, and longer fibres
+--   edges        the edges of the sheet, faintly yellowed
 local PRINT = [[
 uniform vec2 size;
 uniform float scale;
@@ -104,6 +109,24 @@ vec3 sharp(Image tex, vec2 p) {
   vec2 inner = vec2(0.5 - 0.5 / scale);
   f = (f - clamp(f, -inner, inner)) * scale + 0.5;
   return Texel(tex, (cell + f) / size).rgb;
+}
+
+// The paper the plates are printed on (the palette's paper).
+const vec3 PAPER = vec3(0.945, 0.910, 0.816);
+
+// How much of a colour is black ink, 0..1: dark and nearly grey (typed text
+// strikes as light as 85% ink, so up to a luma of about 0.28). Dark greens,
+// browns and the half-transparent drop shadows stay in the colour plate.
+float keyOf(vec3 c) {
+  float l = dot(c, vec3(0.299, 0.587, 0.114));
+  float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+  return (1.0 - smoothstep(0.28, 0.32, l)) * (1.0 - smoothstep(0.08, 0.14, sat));
+}
+
+// The colour plate at a pixel: its colour, with bare paper where the black
+// ink alone prints.
+vec3 colourPlate(vec3 c) {
+  return mix(c, PAPER, keyOf(c));
 }
 
 float hash(vec2 p) {
@@ -121,10 +144,16 @@ float noise(vec2 p) {
 
 vec4 effect(vec4 color, Image tex, vec2 uv, vec2 screen) {
   vec2 p = uv * size;
-  // Out of register: the red plate a little right and down, the blue a
-  // little left. At most about a third of a game pixel.
-  vec2 off = vec2(0.34, 0.22) * misreg;
-  vec3 col = vec3(sharp(tex, p + off).r, sharp(tex, p).g, sharp(tex, p - off * 0.6).b);
+  // Out of register. The black plate stays put; the colour plate is printed
+  // `off` to the right and down, snapped to whole screen pixels so edges stay
+  // crisp: up to a game pixel across and two thirds of one down.
+  vec3 here = sharp(tex, p);
+  vec2 off = floor(vec2(1.0, 0.6) * pow(misreg, 1.5) * scale + 0.5) / scale;
+  // The black plate is what turns this pixel's colour plate into its colour,
+  // so with no slip the picture comes back exactly.
+  const vec3 E = vec3(0.001);
+  vec3 black = (here + E) / (colourPlate(here) + E);
+  vec3 col = colourPlate(sharp(tex, p - off)) * black;
 
   // Where the ink is dark it sits a touch heavier.
   float luma = dot(col, vec3(0.299, 0.587, 0.114));
