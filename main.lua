@@ -3,13 +3,15 @@
 --   lovec . --test    run the headless simulation tests
 --   lovec . --bench   check the quota curve against reference factories
 --   lovec . --sheet   save every machine sprite to sheet.png
+--   lovec . --audio   render the music and ambience to WAV files
 
 local flags = {}
 for _, a in ipairs(arg or {}) do flags[a] = true end
 
-if flags['--test'] or flags['--bench'] or flags['--sheet'] then
+if flags['--test'] or flags['--bench'] or flags['--sheet'] or flags['--audio'] then
   function love.load()
-    local mod = (flags['--test'] and 'tests.sim_test') or (flags['--sheet'] and 'tools.sheet') or 'tests.bench'
+    local mod = (flags['--test'] and 'tests.sim_test') or (flags['--sheet'] and 'tools.sheet')
+      or (flags['--audio'] and 'tools.audio') or 'tests.bench'
     local ok, result = xpcall(function() return require(mod)() end, debug.traceback)
     if not ok then print(result) end
     love.event.quit((ok and result) and 0 or 1)

@@ -5,8 +5,10 @@ site, a factory you keep building for the whole run, and a revenue quota that
 grows from $120 to $2,200,000, and past it in endless mode.
 
 Built with [LÖVE 11.5](https://love2d.org) and a small handwritten ECS.
-320×180 internal resolution, scaled by whole numbers and shown through a
-CRT filter (both adjustable in the settings, F10).
+320×180 pixel art in a retro industrial look: a sunlit site seen from above, with the menus and
+reports done as 1950s paperwork. Scaled by whole numbers and shown through a print filter (paper
+grain, slightly misregistered ink), or a CRT filter, or none (settings, F10). Music, ambience and
+sound effects are all synthesised when the game starts: there are no audio files.
 
 ## Run it
 
@@ -26,11 +28,19 @@ lovec . --bench
 lovec . --shots
 ```
 
+```bash
+lovec . --audio
+```
+
 - `--test` runs the headless tests: the simulation, the rules, the run, saving.
 - `--bench` prints what reference factories earn against every quota (see Balance).
 - `--shots` drives the real game with mouse and keyboard events, checks the results, and saves
   screenshots to the LÖVE save directory. The numbered shots are the bare canvas; the `*_crt_*`
-  ones go through the CRT filter. It ignores your saved settings, records and run, and is silent.
+  ones go through the CRT filter, and the `*_print_*` ones through the print filter. It ignores
+  your saved settings, records and run, and is silent.
+- `--audio` renders the music and ambience, checks them, and saves each as a WAV file in the
+  save directory, to listen to.
+- `--sheet` saves every machine sprite, every frame, at both sizes, to `sheet.png`.
 
 ## How a run works
 
@@ -168,8 +178,13 @@ A shift that was cut short is simply run again. The save is removed when the run
 
 ### Settings
 
-- **Sound**: effects volume, 0 to 100. 0 is silent.
-- **CRT filter**: scanlines, a soft glow, darker corners, a faint colour fringe near the edges
+- **Sound**: effects and ambience volume, 0 to 100. 0 is silent.
+- **Music**: music volume, 0 to 100. One theme in two arrangements: a relaxed one while you
+  build, a driving one while a shift runs, crossfading between them.
+- **Filter**: Print (the default), CRT or Off.
+  - **Print**: the picture as a printed page: paper grain, the ink plates a fraction of a pixel
+    out of register, faintly yellowed edges. One strength slider, 50 by default.
+- **CRT** (when chosen): scanlines, a soft glow, darker corners, a faint colour fringe near the edges
   and a slight bulge. Nothing in it moves or flickers. Scanlines fade out when the picture is
   shown at less than 3×.
   - **Simple**: one strength slider for the whole filter, 0 to 100. 50 is the default, 0 turns it off.
@@ -197,16 +212,22 @@ src/save.lua           the run in progress, as a data-only Lua file
 src/records.lua        records across runs
 src/settings.lua       player settings and their file
 src/sfx.lua            sound effects, synthesised at load time
+src/audio.lua          music and ambience, synthesised at load time
 src/data/              ALL content and balance: items, recipes, machines,
                        upgrades (modules), investments, alternates, bosses,
                        contracts (quotas, land, payouts)
-src/gfx/               palette, pixel font, sprites (authored as text, at two
-                       sizes); crt.lua is the CRT filter and its mouse correction
+src/gfx/               palette, typewriter font, sprites (items authored as
+                       text; machines drawn from shapes in art.lua, animated),
+                       terrain.lua bakes the site and its scenery; crt.lua
+                       holds the print and CRT filters and the mouse correction
 src/ui/                screens: title, game, board (contract choice), shop,
                        recipe book; pause, settings and records panels; fx.lua
-                       holds the upgrade feedback (card pops, tile flashes)
+                       holds the upgrade feedback (card pops, tile flashes);
+                       particles.lua and life.lua the dust, smoke, coins,
+                       workers, trucks, animals, birds and clouds
 tests/                 headless tests, ASCII layout loader, belt router, benchmark
 tools/shots.lua        scripted play-through with screenshots
+tools/sheet.lua        machine sprite sheet; tools/audio.lua the WAV dump
 ```
 
 ### How the rules fit together

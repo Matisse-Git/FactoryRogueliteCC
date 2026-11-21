@@ -360,7 +360,13 @@ return function(App)
     App.move(300, 20)
     wait(1)
     shot('04b_coins')
+    local Audio = require 'src.audio'
+    local quiet = Audio.targets(App)
+    expect('music: paused, the relaxed arrangement plays', quiet.build == 1 and quiet.shift == 0 and quiet.clatter == 0)
     App.g.paused = false
+    local loud = Audio.targets(App)
+    expect('music: a running shift plays the driving one, with hum and clatter',
+      loud.build == 0 and loud.shift == 1 and loud.hum > quiet.hum and loud.clatter > 0 and loud.wind > 0)
 
     App.keypressed('return')
     App.keypressed('4')

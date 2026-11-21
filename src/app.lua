@@ -5,6 +5,7 @@ local P = require 'src.gfx.palette'
 local Font = require 'src.gfx.font'
 local Sprites = require 'src.gfx.sprites'
 local Crt = require 'src.gfx.crt'
+local Audio = require 'src.audio'
 local UI = require 'src.ui.ui'
 local Run = require 'src.run'
 local Settings = require 'src.settings'
@@ -53,6 +54,7 @@ function App.load(flags)
     Settings.load()
     Records.load()
     if Settings.fullscreen then love.window.setFullscreen(true, 'desktop') end
+    Audio.load()
   end
 end
 
@@ -235,6 +237,7 @@ end
 function App.update(dt)
   dt = math.min(dt, 0.1)
   App.time = App.time + dt
+  Audio.update(App, dt)
   if App.overlay then return end
   local scr = screens[App.state]
   if scr.update then scr.update(App, dt) end
