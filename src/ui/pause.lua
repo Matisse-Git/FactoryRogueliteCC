@@ -24,7 +24,7 @@ end
 function Pause.draw(app)
   UI.rect(X + 2, Y + 2, W, H, P.dark, 0.6)
   UI.panel(X, Y, W, H, P.panel, P.line)
-  UI.textCenter('PAUSED', X + W / 2, Y + 6, P.gold)
+  UI.textCenter('PAUSED', X + W / 2, Y + 6, P.money)
   UI.rect(X + 6, Y + 15, W - 12, 1, P.line)
   UI.textCenter('SEED ' .. app.run.seed, X + W / 2, Y + H - 13, P.faint)
 

@@ -55,7 +55,7 @@ local function investIcon(def, x, y)
     UI.frame(x, y, 16, 16, P.goldD)
     UI.sprite(Sprites.item[icon.item], x + 2, y + 6)
   end
-  if icon.money then UI.text('$', x + 11, y + 2, P.gold) end
+  if icon.money then UI.text('$', x + 11, y + 2, P.money) end
 end
 
 local function rate(def)
@@ -85,8 +85,8 @@ local function describe(run, o)
   elseif o.type == 'upgrade' then
     local def = Upgrades.byId[o.id]
     return {
-      label = def.rarity, labelColor = P[Upgrades.RARITY_COLOR[def.rarity]], name = def.name, nameColor = P[def.color],
-      tip = { title = def.name, color = P[def.color], lines = { def.desc } },
+      label = def.rarity, labelColor = P.inkOf(Upgrades.RARITY_COLOR[def.rarity]), name = def.name, nameColor = P.inkOf(def.color),
+      tip = { title = def.name, color = P.inkOf(def.color), lines = { def.desc } },
       icon = function(x, y) UI.card(def, x, y) end,
     }
   end
@@ -116,7 +116,7 @@ local function drawOffer(app, i, o)
   local d = describe(run, o)
   local hot = UI.inside(x, y, w, h)
   local picking = shop.replace == i
-  UI.panel(x, y, w, h, o.sold and P.bg or P.panel, picking and P.yellow or (hot and P.text or (o.sold and P.faint or P.line)))
+  UI.panel(x, y, w, h, o.sold and P.bg or P.panel, picking and P.amber or (hot and P.text or (o.sold and P.faint or P.line)))
   d.icon(x + 4, y + 4)
   local ny = y + 4
   if d.label then
@@ -136,10 +136,10 @@ local function drawOffer(app, i, o)
   elseif blocked == 'slots full' then
     -- All five slots are taken: this one has to replace another.
     local label = picking and 'CANCEL' or ('REPLACE $' .. o.cost)
-    if UI.button(label, x + 4, by, w - 8, 12, { disabled = not anyReplace(run, i), color = P.yellow, active = picking }) then
+    if UI.button(label, x + 4, by, w - 8, 12, { disabled = not anyReplace(run, i), color = P.amber, active = picking }) then
       shop.replace = (not picking) and i or nil
     end
-  elseif UI.button('BUY $' .. o.cost, x + 4, by, w - 8, 12, { disabled = blocked ~= nil, color = P.gold }) then
+  elseif UI.button('BUY $' .. o.cost, x + 4, by, w - 8, 12, { disabled = blocked ~= nil, color = P.money }) then
     run:buy(i)
     shop.replace = nil
     Sfx.play('buy')
@@ -157,8 +157,8 @@ end
 local function drawOwned(app)
   local run, shop = app.run, app.run.shop
   local picking = shop.replace
-  UI.text('MODULES ' .. #run.upgrades .. '/' .. Upgrades.slots, 84, 126, picking and P.yellow or P.dim)
-  if picking then UI.text('WHICH ONE GOES?', 136, 126, P.yellow) end
+  UI.text('MODULES ' .. #run.upgrades .. '/' .. Upgrades.slots, 84, 126, picking and P.amber or P.dim)
+  if picking then UI.text('WHICH ONE GOES?', 136, 126, P.amber) end
   for i = 1, Upgrades.slots do
     local x, y = OWNED.x + (i - 1) * OWNED.pitch, OWNED.y
     local id = run.upgrades[i]
@@ -167,11 +167,11 @@ local function drawOwned(app)
       local refund = Upgrades.refund(def)
       UI.card(def, x + 7, y, picking and (math.floor(app.time * 4) % 2) * 0.6 or 0)
       if UI.inside(x, y, 30, 16) then
-        UI.tip = { title = def.name, color = P[def.color], lines = { def.desc, 'SELLS FOR $' .. refund .. '.' } }
+        UI.tip = { title = def.name, color = P.inkOf(def.color), lines = { def.desc, 'SELLS FOR $' .. refund .. '.' } }
       end
       if picking then
         local ok = run:canReplace(i, picking)
-        if UI.button('SWAP', x, y + 17, 30, 9, { disabled = not ok, color = P.yellow })
+        if UI.button('SWAP', x, y + 17, 30, 9, { disabled = not ok, color = P.amber })
             or (ok and UI.clicked(x, y, 30, 16)) then
           run:replaceUpgrade(i, picking)
           shop.replace = nil
@@ -236,7 +236,7 @@ function Shop.draw(app)
 
   UI.rect(0, 0, 320, 180, P.bg)
   UI.text('SHOP', 8, 5, P.text, 2)
-  UI.textRight('$' .. run.credits, 312, 5, P.gold, 2)
+  UI.textRight('$' .. run.credits, 312, 5, P.money, 2)
   if UI.button('MENU', 146, 5, 27, 9) then app.openPause() end
   local p = run.lastPayout
   if p then

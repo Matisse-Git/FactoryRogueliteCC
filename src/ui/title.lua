@@ -9,7 +9,7 @@ local Title = {}
 
 function Title.draw(app)
   UI.rect(0, 0, 320, 180, P.bg)
-  UI.textCenter('QUOTA', 160, 30, P.gold, 6)
+  UI.textCenter('QUOTA', 160, 30, P.money, 6)
   UI.textCenter('A FACTORY ROGUELITE', 160, 68, P.dim)
 
   -- A belt of everything the factory can make.
@@ -26,7 +26,7 @@ function Title.draw(app)
   UI.textCenter('SEED ' .. app.seed, 160, 106, P.text)
   UI.textCenter('TYPE DIGITS TO CHANGE IT', 160, 114, P.faint)
   local saved = app.hasSave()
-  if saved and UI.button('CONTINUE', 122, 123, 76, 13, { color = P.gold }) then app.continueRun() end
+  if saved and UI.button('CONTINUE', 122, 123, 76, 13, { color = P.money }) then app.continueRun() end
   if UI.button(saved and 'NEW RUN' or 'START RUN', 122, 139, 76, 13, { color = P.green }) then app.newRun() end
   if UI.button('RECORDS', 102, 155, 56, 11) then app.openRecords() end
   if UI.button('SETTINGS', 162, 155, 56, 11) then app.openSettings() end

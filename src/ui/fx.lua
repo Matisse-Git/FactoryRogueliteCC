@@ -20,7 +20,7 @@ end
 
 -- Bosses have no colour of their own.
 function Fx.color(mod)
-  return P[mod.color] or P.red
+  return P.inkOf(mod.color) or P.red
 end
 
 -- Pop the card (or boss label) of `mod`. A re-trigger simply restarts it, so

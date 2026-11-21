@@ -41,7 +41,7 @@ function Land.draw(plot, ox, oy, T, alpha)
     local x, y = ox + p.x * T, oy + p.y * T
     UI.sprite(S.machine.port, x, y, 0, alpha)
     UI.sprite(S.item[p.item], x + T / 4, y + T / 4, 0, alpha)
-    Land.nub(x, y, p.dir, p.rich and P.gold or P.yellow, alpha, T)
+    Land.nub(x, y, p.dir, p.rich and P.money or P.amber, alpha, T)
   end
 end
 

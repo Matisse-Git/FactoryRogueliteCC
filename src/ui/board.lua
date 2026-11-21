@@ -72,7 +72,7 @@ local function drawCard(app, i, offer)
     ty = ty + 9
     for _, p in ipairs(plot.ports) do
       UI.sprite(Sprites.item[p.item], tx, ty - 1)
-      UI.text(Fmt.perMin(p.period), tx + 11, ty + 1, p.rich and P.gold or P.text)
+      UI.text(Fmt.perMin(p.period), tx + 11, ty + 1, p.rich and P.money or P.text)
       ty = ty + 9
     end
     if plot.special then
@@ -88,7 +88,7 @@ local function drawCard(app, i, offer)
   Board.marketRows(run, offer.market, plot, x + 5, y + 66, w - 10)
 
   if offer.bonus > 0 then
-    UI.text('+' .. offer.bonus .. ' CREDITS', x + 5, y + h - 12, P.gold)
+    UI.text('+' .. offer.bonus .. ' CREDITS', x + 5, y + h - 12, P.money)
   end
   if UI.button('TAKE ' .. i, x + w - 54, y + h - 17, 50, 13, { color = P.green }) then take(app, i) end
 end
@@ -101,7 +101,7 @@ local function drawReward(app)
   local run = app.run
   local options = run.reward.options
   UI.rect(0, 0, 320, 180, P.bg)
-  UI.textCenter('BOSS BEATEN', 160, 8, P.gold, 2)
+  UI.textCenter('BOSS BEATEN', 160, 8, P.money, 2)
   UI.textCenter('TAKE ONE. IT IS YOURS FOR THE REST OF THE RUN.', 160, 26, P.dim)
   for i, o in ipairs(options) do
     local x, y, w, h = rewardX(i, #options), REWARD.y, REWARD.w, REWARD.h
@@ -138,7 +138,7 @@ function Board.draw(app)
   local c = run:contract(run.index + 1)
   UI.rect(0, 0, 320, 180, P.bg)
   UI.text('NEXT CONTRACT', 8, 5, P.text, 2)
-  UI.textRight('QUOTA ' .. Fmt.money(c.quota), 312, 5, P.gold, 2)
+  UI.textRight('QUOTA ' .. Fmt.money(c.quota), 312, 5, P.money, 2)
   if UI.button('MENU', 146, 5, 27, 9) then app.openPause() end
   local sub = 'CONTRACT ' .. c.index .. (c.index <= run:total() and (' OF ' .. run:total()) or ' (ENDLESS)')
   UI.text(sub, 8, 20, P.dim)

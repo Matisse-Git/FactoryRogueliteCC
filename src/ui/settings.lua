@@ -103,17 +103,17 @@ local function drawSlider(row)
   local kx = TRACK + value / 10 * STEP
   local hot = dragging == row.key or (not dragging and onTrack(row, UI.mx, UI.my))
   if hot then focus = row.key end
-  UI.rect(TRACK, y + 2, kx - TRACK, 1, P.gold)
+  UI.rect(TRACK, y + 2, kx - TRACK, 1, P.money)
   UI.rect(kx - 2, y - 2, 5, 9, focus == row.key and P.white or P.dim)
   UI.frame(kx - 2, y - 2, 5, 9, P.dark)
-  UI.textRight(value == 0 and 'OFF' or value, X + W - 6, y, P.gold)
+  UI.textRight(value == 0 and 'OFF' or value, X + W - 6, y, P.money)
 end
 
 function Panel.draw(app)
   local rows, y, h = layout()
   UI.rect(X + 2, y + 2, W, h, P.dark, 0.6)
   UI.panel(X, y, W, h, P.panel, P.line)
-  UI.textCenter('SETTINGS', X + W / 2, y + 6, P.gold)
+  UI.textCenter('SETTINGS', X + W / 2, y + 6, P.money)
   UI.rect(X + 6, y + 15, W - 12, 1, P.line)
 
   for _, row in ipairs(rows) do

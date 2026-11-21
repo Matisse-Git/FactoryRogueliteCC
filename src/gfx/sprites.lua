@@ -14,10 +14,11 @@ local Items = require 'src.data.items'
 local Sprites = { set = { [16] = {}, [8] = {} } }
 
 -- Characters used in the sprite text below.
+local SP = P.sprite
 local MAP = {
-  ['0'] = P.dark, ['1'] = P.panel2, ['2'] = P.ironD, ['3'] = P.iron, ['4'] = P.ironL,
-  w = P.white, o = P.orange, y = P.yellow, r = P.red, g = P.green, G = P.greenD,
-  b = P.blue, p = P.purple, c = P.cyan, k = P.coal, K = P.coalL,
+  ['0'] = P.dark, ['1'] = SP.panel2, ['2'] = P.ironD, ['3'] = P.iron, ['4'] = P.ironL,
+  w = SP.white, o = SP.orange, y = SP.yellow, r = SP.red, g = SP.green, G = P.greenD,
+  b = SP.blue, p = SP.purple, c = SP.cyan, k = P.coal, K = P.coalL,
   u = P.copper, U = P.copperL, d = P.gold, D = P.goldL,
 }
 
@@ -621,13 +622,12 @@ local function floorTile(size, pad)
   local last = size - 1
   for y = 0, last do
     for x = 0, last do
-      local c = (x == last or y == last) and P.bg or P.floor
-      if x == 0 and y == 0 then c = P.floor2 end
+      local c = (x == last or y == last) and P.concreteD or P.concrete
       if pad then
-        -- A ring of chevrons: whatever stands here runs faster.
-        local edge = x == 0 or y == 0 or x == last - 1 or y == last - 1
-        if edge and (x + y) % 2 == 0 and x < last and y < last then c = P.cyanD end
-        if not edge and x < last and y < last then c = P.pad end
+        -- A steel plate ringed with chevrons: whatever stands here runs faster.
+        local edge = x == 0 or y == 0 or x == last or y == last
+        c = P.pad
+        if edge then c = ((x + y) % 2 == 0) and P.amber or P.dark end
       end
       data:setPixel(x, y, c[1], c[2], c[3], 1)
     end
@@ -640,8 +640,7 @@ local function lockedTile(size)
   local data = love.image.newImageData(size, size)
   for y = 0, size - 1 do
     for x = 0, size - 1 do
-      local c = P.bg
-      if x == size / 2 and y == size / 2 then c = P.floor end
+      local c = ((x * 7 + y * 13) % 11 == 0) and P.grassD or P.grass
       data:setPixel(x, y, c[1], c[2], c[3], 1)
     end
   end

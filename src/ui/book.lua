@@ -41,9 +41,9 @@ local function recipeRow(r, x, y, owner)
     UI.sprite(Sprites.item[out[1]], ox, y)
     local label = Items[out[1]].name
     if out[2] > 1 then label = label .. ' X' .. out[2] end
-    UI.text(label, ox + 10, y + 2, owner and P[owner.color] or P.text)
+    UI.text(label, ox + 10, y + 2, owner and P.inkOf(owner.color) or P.text)
     ox = ox + 10 + Font.width(label) + 3
-    UI.text('$' .. Items[out[1]].value, ox, y + 2, P.gold)
+    UI.text('$' .. Items[out[1]].value, ox, y + 2, P.money)
     ox = ox + Font.width('$' .. Items[out[1]].value) + 4
   end
 end
@@ -52,7 +52,7 @@ local function header(app, kind, x, y)
   local def = Machines[kind]
   local have = app.run:unlocked(kind)
   UI.sprite(Sprites.machine[kind], x, y, 0, have and 1 or 0.4)
-  UI.text(def.name, x + 19, y + 2, have and P.gold or P.faint)
+  UI.text(def.name, x + 19, y + 2, have and P.money or P.faint)
   local sub = def.time and (rate(def.time) .. ', ' .. def.draw .. 'W') or ''
   if not have then sub = sub .. (sub ~= '' and '  ' or '') .. 'NO BLUEPRINT' end
   UI.text(sub, x + 19, y + 9, P.dim)
@@ -67,7 +67,7 @@ local TEXT = {
 
 local function section(app, kind, x, y)
   if kind == 'logistics' then
-    UI.text('LOGISTICS', x, y + 2, P.gold)
+    UI.text('LOGISTICS', x, y + 2, P.money)
     y = y + 11
     for _, line in ipairs({
       'BELT: 60/MIN.', 'PORT: 30/MIN, RICH PORT 60/MIN.',
@@ -139,7 +139,7 @@ function Book.draw(app)
       local col, row = math.floor((i - 1) / rows), (i - 1) % rows
       local x, y = 9 + col * 102, 22 + row * 11
       UI.sprite(Sprites.item[id], x, y)
-      UI.textRight('$' .. Items[id].value, x + 28, y + 2, P.gold)
+      UI.textRight('$' .. Items[id].value, x + 28, y + 2, P.money)
       UI.text(Items[id].name, x + 32, y + 2, P.dim)
     end
     UI.text('POLISHED: X2.  CRATE OF 4: X4.4.', 9, 168, P.faint)

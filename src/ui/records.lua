@@ -12,7 +12,7 @@ local X, Y, W, H = 85, 40, 150, 100
 function Panel.draw(app)
   UI.rect(X + 2, Y + 2, W, H, P.dark, 0.6)
   UI.panel(X, Y, W, H, P.panel, P.line)
-  UI.textCenter('RECORDS', X + W / 2, Y + 6, P.gold)
+  UI.textCenter('RECORDS', X + W / 2, Y + 6, P.money)
   UI.rect(X + 6, Y + 15, W - 12, 1, P.line)
   local rows = {
     { 'RUNS STARTED', tostring(Records.runs) },
