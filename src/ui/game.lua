@@ -12,6 +12,7 @@ local Terrain = require 'src.gfx.terrain'
 local UI = require 'src.ui.ui'
 local Fx = require 'src.ui.fx'
 local Particles = require 'src.ui.particles'
+local Art = require 'src.gfx.art'
 local Book = require 'src.ui.book'
 local Fmt = require 'src.fmt'
 local Sfx = require 'src.sfx'
@@ -469,11 +470,34 @@ local function updateClearing(g, dt)
   end
 end
 
+-- Smoke from the chimneys of machines at work.
+local SMOKE_RATE = 3       -- puffs per second per chimney, at 1x
+local SMOKE = { 'stoneL', 'concreteL', 'stone' }
+local function updateSmoke(app, dt)
+  local g = app.g
+  if g.mode ~= 'run' or g.paused then return end
+  local rnd = love.math.random
+  local machines = app.run.factory.world:query('machine')
+  for i = 1, #machines do
+    local e = machines[i]
+    local at = Art.smoke[e.building.kind]
+    if at and e.machine.status == 'work' and rnd() < SMOKE_RATE * dt * g.speed then
+      Particles.add(g.parts, {
+        x = e.pos.x + (at[1] + 0.5) / 16, y = e.pos.y + at[2] / 16,
+        vx = 0.15 + rnd() * 0.2, vy = -0.5 - rnd() * 0.3, drag = 0.4,
+        life = 1.2 + rnd() * 0.8, size = 2, grow = 4, alpha = 0.7,
+        color = P[SMOKE[floor(rnd() * #SMOKE) + 1]],
+      })
+    end
+  end
+end
+
 function Game.update(app, dt)
   local g = app.g
   Fx.update(g.fx, dt)
   Particles.update(g.parts, dt)
   updateClearing(g, dt)
+  updateSmoke(app, dt)
   if g.mode == 'summary' then advanceReveal(g, dt) end
   if g.mode == 'run' and not g.paused then
     g.acc = g.acc + dt * TPS * g.speed
@@ -527,7 +551,6 @@ local function nub(x, y, dir, c, a, T)
   end
 end
 
-local STATUS_COLOR = { work = P.green, idle = P.faint, blocked = P.amber, off = P.red }
 
 -- A belt takes its shape from what feeds it: a lone side feed makes a
 -- rounded corner, any other side feed opens the rail on that side.
@@ -544,22 +567,40 @@ local function drawBelt(S, F, e, x, y, frame)
 end
 
 -- Any piece other than a belt in a line. `b` = { kind, dir }.
-local function drawPiece(S, T, b, x, y, alpha, item, hasOutput)
+-- img and shade: the animation frame to draw, and how dim (for a machine
+-- that is idle or stuck).
+local function drawPiece(S, T, b, x, y, alpha, item, hasOutput, img, shade)
   local kind = b.kind
   if kind == 'belt' then
     UI.sprite(S.belt[1], x, y, b.dir, alpha)
     return
   end
-  UI.sprite(S.machine[kind], x, y, Sprites.rotates[kind] and b.dir or 0, alpha)
+  UI.sprite(img or S.machine[kind], x, y, Sprites.rotates[kind] and b.dir or 0, alpha, false, shade)
   if item then UI.sprite(S.item[item], x + T / 4, y + T / 4, 0, alpha) end
   if hasOutput then nub(x, y, b.dir, P.amber, alpha, T) end
 end
+
+local clock = 0          -- seconds, for animation (set by drawBoard)
+local ANIM_FPS = 6
+local IDLE_SHADE = 0.78
 
 local function drawBuilding(S, T, e, x, y, live)
   local b = e.building
   -- The depot's tiles are drawn as one building, under them.
   if not e.export then
-    drawPiece(S, T, b, x, y, 1, e.port and e.port.item, e.port or (e.machine and e.slot))
+    -- At work, machines (and the ports supplying them) animate; idle or
+    -- stuck, they stand still and dim.
+    local m = e.machine
+    local frames = S.anim[b.kind]
+    local img, shade
+    if live and frames then
+      if (m and m.status == 'work') or e.port then
+        img = frames[floor(clock * ANIM_FPS + e.pos.x * 3 + e.pos.y * 5) % #frames + 1]
+      elseif m then
+        shade = IDLE_SHADE
+      end
+    end
+    drawPiece(S, T, b, x, y, 1, e.port and e.port.item, e.port or (e.machine and e.slot), img, shade)
   end
   if e.filter and e.filter.item then
     -- What it lets straight through.
@@ -580,10 +621,17 @@ local function drawBuilding(S, T, e, x, y, live)
   elseif e.machine and live then
     local m = e.machine
     local big = T == 16
-    if big then
-      UI.rect(x + 11, y + 2, 2, 2, STATUS_COLOR[m.status] or P.faint)
-    else
-      UI.rect(x + 6, y + 1, 1, 1, STATUS_COLOR[m.status] or P.faint)
+    -- A lamp when it is stuck: amber and blinking when blocked, red when off.
+    if m.status == 'blocked' or m.status == 'off' then
+      local c = m.status == 'off' and P.sprite.red or P.sprite.yellow
+      local on = m.status == 'off' or floor(clock * 3) % 2 == 0
+      if big then
+        UI.rect(x + 11, y + 1, 4, 4, P.dark)
+        if on then UI.rect(x + 12, y + 2, 2, 2, c) end
+      else
+        UI.rect(x + 5, y, 3, 3, P.dark)
+        if on then UI.rect(x + 6, y + 1, 1, 1, c) end
+      end
     end
     local bx, by, bw = x + (big and 3 or 1), y + (big and 12 or 6), big and 10 or 6
     if m.craft then
@@ -612,6 +660,7 @@ local function drawBoard(app)
   local T = cam.T
   local S = Sprites.set[T]
   local big = T == 16
+  clock = app.time
 
   love.graphics.setScissor(VX, VY, VW, VH)
 

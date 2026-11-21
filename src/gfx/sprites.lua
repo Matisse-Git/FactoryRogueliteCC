@@ -5,11 +5,13 @@
 --   Sprites.set[16]  close view: 16 px tiles, 8 px items
 --   Sprites.set[8]   overview:    8 px tiles, 4 px items
 -- Both sets have the same keys: floor, pad, locked, belt[1..4], corner[1..4],
--- inlet, machine[kind], item[id]. Sprites.machine / item / belt are the big
--- set, for the screens that do not zoom.
+-- inlet, machine[kind], anim[kind] (frames, see src/gfx/art.lua), item[id].
+-- Sprites.machine / item / belt are the big set, for the screens that do
+-- not zoom.
 
 local P = require 'src.gfx.palette'
 local Items = require 'src.data.items'
+local Art = require 'src.gfx.art'
 
 local Sprites = { set = { [16] = {}, [8] = {} } }
 
@@ -331,261 +333,6 @@ local MINI_FORMS = {
   camera  = { '0...', '3333', '3cc3', '3333' },
 }
 
----------------------------------------------------------------- machine icons
--- BIG: 10x10, drawn on a 16x16 bevelled body. SMALL: 6x6, on an 8x8 body.
-
-local BIG = {
-  smelter = {
-    '....o.....',
-    '...oo.....',
-    '...oyo....',
-    '..ooyo.o..',
-    '..oyyoooo.',
-    '.ooyyyyoo.',
-    '.oyywwyyo.',
-    '.oyywwyyo.',
-    '..oyyyyo..',
-    '...oooo...',
-  },
-  press = {
-    '.44444444.',
-    '.33333333.',
-    '....33....',
-    '....33....',
-    '..333333..',
-    '..........',
-    '...dddd...',
-    '.22222222.',
-    '.33333333.',
-    '..........',
-  },
-  assembler = {
-    '4........4',
-    '44......44',
-    '.44....44.',
-    '..44..44..',
-    '...4444...',
-    '....44....',
-    '....44....',
-    '..444444..',
-    '...4444...',
-    '....44....',
-  },
-  crusher = {
-    '4444444444',
-    '.4.4.4.4.4',
-    '..........',
-    '..u..u....',
-    '....u..u..',
-    '.u.....u..',
-    '..........',
-    '4.4.4.4.4.',
-    '4444444444',
-    '..........',
-  },
-  polisher = {
-    '....w.....',
-    '....w.....',
-    '...wpw....',
-    '.wwpppww..',
-    '...wpw....',
-    '....w..w..',
-    '....w.wpw.',
-    '.......w..',
-    '..........',
-    '..........',
-  },
-  generator = {
-    '......yy..',
-    '.....yy...',
-    '....yy....',
-    '...yyyyy..',
-    '.....yy...',
-    '....yy....',
-    '...yy.....',
-    '..yy......',
-    '..........',
-    '..........',
-  },
-  wiremill = {
-    '..........',
-    '.UUUUUUUU.',
-    'u........u',
-    '.UUUUUUUU.',
-    'u........u',
-    '.UUUUUUUU.',
-    'u........u',
-    '.uuuuuuuu.',
-    '..........',
-    '..........',
-  },
-  foundry = {
-    'o........o',
-    'oo......oo',
-    '.oo....oo.',
-    '.oyyyyyyo.',
-    '.oyywwyyo.',
-    '..oyyyyo..',
-    '...oooo...',
-    '....33....',
-    '..333333..',
-    '..........',
-  },
-  refinery = {
-    '..cc......',
-    '..cc..cc..',
-    '..cc..cc..',
-    '..cc..cc..',
-    '.cccccccc.',
-    '.c.cccc.c.',
-    '.c.cccc.c.',
-    '.cccccccc.',
-    '..........',
-    '..........',
-  },
-  manufacturer = {
-    '...4444...',
-    '..44..44..',
-    '.44....44.',
-    '.4..ww..4.',
-    '.4.wwww.4.',
-    '.4.wwww.4.',
-    '.4..ww..4.',
-    '.44....44.',
-    '..44..44..',
-    '...4444...',
-  },
-  packer = {
-    '.DDDDDDDD.',
-    '.d.dddd.d.',
-    '.dddddddd.',
-    '.d......d.',
-    '.d..dd..d.',
-    '.d..dd..d.',
-    '.d......d.',
-    '.dddddddd.',
-    '..........',
-    '..........',
-  },
-  splitter = {   -- drawn facing east, rotated at draw time
-    '....4.....',
-    '...444....',
-    '....4.....',
-    '....4...4.',
-    '4444444444',
-    '....4...4.',
-    '....4.....',
-    '...444....',
-    '....4.....',
-    '..........',
-  },
-  filter = {     -- drawn facing east, rotated at draw time
-    '4.........',
-    '44........',
-    '444.......',
-    '4444......',
-    '444444444.',
-    '4444......',
-    '444.......',
-    '44........',
-    '4.........',
-    '..........',
-  },
-  export = {
-    '....ww....',
-    '..wwwwww..',
-    '.ww.ww....',
-    '.ww.ww....',
-    '..wwwwww..',
-    '....ww.ww.',
-    '....ww.ww.',
-    '..wwwwww..',
-    '....ww....',
-    '..........',
-  },
-  node = {
-    '......cc..',
-    '.....cc...',
-    '....cc....',
-    '...ccccc..',
-    '.....cc...',
-    '....cc....',
-    '...cc.....',
-    '..cc......',
-    '..........',
-    '..........',
-  },
-}
-
-local SMALL = {
-  smelter      = { '..o...', '.oyo..', '.oyyo.', 'oywwyo', 'oyyyyo', '.oooo.' },
-  press        = { '444444', '..33..', '..33..', '.3333.', '......', '222222' },
-  assembler    = { '4....4', '.4..4.', '..44..', '..44..', '.4444.', '..44..' },
-  crusher      = { '444444', '.4.4.4', '......', '.u..u.', '4.4.4.', '444444' },
-  polisher     = { '..w...', '.wpw..', 'wpppw.', '.wpw.w', '..w.wp', '.....w' },
-  generator    = { '...yy.', '..yy..', '.yyyy.', '..yy..', '.yy...', 'yy....' },
-  wiremill     = { '.UUUU.', 'u....u', '.UUUU.', 'u....u', '.uuuu.', '......' },
-  foundry      = { 'o....o', 'oo..oo', '.oyyo.', '.oyyo.', '..oo..', '.3333.' },
-  refinery     = { '.cc...', '.cc.cc', '.cc.cc', 'cccccc', 'c.cc.c', 'cccccc' },
-  manufacturer = { '.4444.', '44..44', '4.ww.4', '4.ww.4', '44..44', '.4444.' },
-  packer       = { 'DDDDDD', 'd.dd.d', 'dddddd', 'd....d', 'd....d', 'dddddd' },
-  splitter     = { '..4.4.', '...44.', '444444', '...44.', '..4.4.', '......' },
-  filter       = { '4.....', '44....', '44444.', '44....', '4.....', '......' },
-  export       = { '.wwww.', 'ww....', '.www..', '...ww.', 'wwww..', '..w...' },
-  node         = { '...cc.', '..cc..', '.cccc.', '..cc..', '.cc...', 'cc....' },
-}
-
-local BODY = {   -- body, highlight, shade
-  smelter      = { '5a2c2c', '7c4242', '3a1b1e' },
-  press        = { '3a4766', '55668c', '252e46' },
-  assembler    = { '2a5654', '3f7a76', '1a3838' },
-  crusher      = { '5a5034', '7c7050', '3a3320' },
-  polisher     = { '4a3870', '6a5498', '2e2248' },
-  generator    = { '6a5a22', '8e7c38', '443a14' },
-  wiremill     = { '4a3524', '6e5238', '2e2014' },
-  foundry      = { '5e3a1e', '84562e', '3c2412' },
-  refinery     = { '234a5a', '386e82', '14303a' },
-  manufacturer = { '3a3a5e', '56568a', '24243e' },
-  packer       = { '5a4a2a', '80693e', '3a2f18' },
-  splitter     = { '3a3852', '55527a', '25233a' },
-  filter       = { '3a3852', '55527a', '25233a' },
-  export       = { '2c6e3a', '46a058', '1a4424' },
-  port         = { '2b2846', '47436e', '1a182c' },
-  node         = { '1f3f66', '32609a', '12263f' },
-}
-
--- A bevelled machine body with an optional icon on top, 16 or 8 px.
-local function chassis(kind, size)
-  local body, light, shade = P.hex(BODY[kind][1]), P.hex(BODY[kind][2]), P.hex(BODY[kind][3])
-  local data = love.image.newImageData(size, size)
-  if size == 16 then
-    for y = 1, 14 do
-      for x = 1, 14 do
-        local corner = (x == 1 or x == 14) and (y == 1 or y == 14)
-        if not corner then
-          local c = body
-          if x == 1 or x == 14 or y == 1 or y == 14 then c = P.dark
-          elseif x == 2 or y == 2 then c = light
-          elseif x == 13 or y == 13 then c = shade end
-          data:setPixel(x, y, c[1], c[2], c[3], 1)
-        end
-      end
-    end
-    if BIG[kind] then paint(data, BIG[kind], MAP, 3, 3) end
-  else
-    for y = 0, 7 do
-      for x = 0, 7 do
-        local c = body
-        if x == 0 or y == 0 then c = light
-        elseif x == 7 or y == 7 then c = shade end
-        data:setPixel(x, y, c[1], c[2], c[3], 1)
-      end
-    end
-    if SMALL[kind] then paint(data, SMALL[kind], MAP, 1, 1) end
-  end
-  return image(data)
-end
-
 -- Floor of an owned plot. `pad` marks a booster pad.
 local function floorTile(size, pad)
   local data = love.image.newImageData(size, size)
@@ -626,7 +373,7 @@ local function beltFrame(size, frame)
     for x = 0, size - 1 do
       local c
       if y == top or y == bottom then
-        c = P.rail
+        c = (x % (4 * k) == 0) and P.kerb or P.rail     -- rivets on the frame
       else
         local v = (x / k + math.abs(y / k - 7.5 + (k < 1 and 0.5 or 0)) - 0.5 - frame * 2) % 8
         c = (v < 2) and P.beltL or P.belt
@@ -710,14 +457,9 @@ local function bridgeTile(size)
   return image(data)
 end
 
-local MACHINES = {
-  'smelter', 'press', 'assembler', 'crusher', 'polisher', 'generator',
-  'wiremill', 'foundry', 'refinery', 'manufacturer', 'packer',
-  'splitter', 'filter', 'export', 'port', 'node',
-}
 
 local function buildSet(size)
-  local set = { belt = {}, corner = {}, machine = {}, item = {} }
+  local set = { belt = {}, corner = {}, machine = {}, item = {}, anim = {} }
   set.floor = floorTile(size)
   set.pad = floorTile(size, true)
   set.locked = lockedTile(size)
@@ -726,7 +468,10 @@ local function buildSet(size)
     set.corner[f + 1] = cornerFrame(size, f)
   end
   set.inlet = inletTile(size)
-  for _, kind in ipairs(MACHINES) do set.machine[kind] = chassis(kind, size) end
+  for _, kind in ipairs(Art.kinds) do
+    local frames = Art.frames(kind)[size]
+    set.machine[kind], set.anim[kind] = frames[1], frames
+  end
   set.machine.bridge = bridgeTile(size)
   set.machine.rubble = require('src.gfx.terrain').boulder(size)
   set.machine.rock = set.machine.rubble

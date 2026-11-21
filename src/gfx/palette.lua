@@ -62,7 +62,7 @@ local raw = {
   stone = '9a958a', stoneL = 'bdb8ab', stoneD = '6e6a61',
   shadow = '2a2418',
 
-  belt = '45403a', beltL = '645d53', rail = '9a948a',
+  belt = '5b554d', beltL = '7a7367', rail = 'a9a397',
   pad = '7fa8b0', padL = 'a8ccd2',
   roof = 'a5493a', roofL = 'c4664f', roofD = '7a3328',
 }
