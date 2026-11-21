@@ -60,11 +60,13 @@ local function drawCard(app, i, offer)
   local run = app.run
   local x, y, w, h = cardX(i), CARD.y, CARD.w, CARD.h
   local hot = UI.inside(x, y, w, h)
-  UI.panel(x, y, w, h, P.panel, hot and P.text or P.line)
+  UI.paper(x, y - (hot and 1 or 0), w, h)
+  if hot then y = y - 1 end
 
   -- The land.
   local plot = offer.plot
-  UI.rect(x + 4, y + 4, Map.PW * 8 + 2, Map.PH * 8 + 2, P.bg)
+  UI.rect(x + 4, y + 4, Map.PW * 8 + 2, Map.PH * 8 + 2, P.grass)
+  UI.frame(x + 4, y + 4, Map.PW * 8 + 2, Map.PH * 8 + 2, P.dark)
   if plot then
     Land.draw(plot, x + 5, y + 5, 8, 1)
     local tx, ty = x + 75, y + 5
@@ -88,9 +90,18 @@ local function drawCard(app, i, offer)
   Board.marketRows(run, offer.market, plot, x + 5, y + 66, w - 10)
 
   if offer.bonus > 0 then
-    UI.text('+' .. offer.bonus .. ' CREDITS', x + 5, y + h - 12, P.money)
+    UI.stamp('+' .. offer.bonus .. ' CREDITS', x + 36, y + h - 30, P.money, 1, 0)
   end
-  if UI.button('TAKE ' .. i, x + w - 54, y + h - 17, 50, 13, { color = P.green }) then take(app, i) end
+  -- Signed at the bottom.
+  UI.text('SIGNED', x + 5, y + h - 10, P.faint)
+  UI.rect(x + 31, y + h - 5, w - 92, 1, P.dark)
+  if hot then
+    -- A signature, scrawled.
+    UI.color(P.blue)
+    local sx, sy = x + 33, y + h - 7
+    for k = 0, w - 98, 2 do love.graphics.points(sx + k + 0.5, sy + math.floor(math.sin(k * 0.7 + i) * 2) + 0.5) end
+  end
+  if UI.button('SIGN ' .. i, x + w - 54, y + h - 17, 50, 13, { color = P.green }) then take(app, i) end
 end
 
 -- Beating a boss: one of three blueprints (or recipes), free.
@@ -100,13 +111,15 @@ local function rewardX(i, n) return 160 - (n * 100 - 4) / 2 + (i - 1) * 100 end
 local function drawReward(app)
   local run = app.run
   local options = run.reward.options
-  UI.rect(0, 0, 320, 180, P.bg)
-  UI.textCenter('BOSS BEATEN', 160, 8, P.money, 2)
+  UI.desk(0, 0, 320, 180)
+  UI.paper(40, 3, 240, 33)
+  UI.textCenter('BOSS BEATEN', 160, 8, P.text, 2)
   UI.textCenter('TAKE ONE. IT IS YOURS FOR THE REST OF THE RUN.', 160, 26, P.dim)
   for i, o in ipairs(options) do
     local x, y, w, h = rewardX(i, #options), REWARD.y, REWARD.w, REWARD.h
     local hot = UI.inside(x, y, w, h)
-    UI.panel(x, y, w, h, P.panel, hot and P.text or P.line)
+    UI.paper(x, y - (hot and 1 or 0), w, h)
+    if hot then y = y - 1 end
     local name, desc, kind
     if o.type == 'blueprint' then
       local def = Machines[o.id]
@@ -136,7 +149,8 @@ function Board.draw(app)
     return
   end
   local c = run:contract(run.index + 1)
-  UI.rect(0, 0, 320, 180, P.bg)
+  UI.desk(0, 0, 320, 180)
+  UI.paper(3, 2, 314, 25)
   UI.text('NEXT CONTRACT', 8, 5, P.text, 2)
   UI.textRight('QUOTA ' .. Fmt.money(c.quota), 312, 5, P.money, 2)
   if UI.button('MENU', 146, 5, 27, 9) then app.openPause() end

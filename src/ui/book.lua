@@ -115,15 +115,26 @@ end
 function Book.draw(app)
   local g = app.g
   g.bookPage = g.bookPage or 1
-  UI.rect(0, 0, 320, 180, P.dark, 0.85)
-  UI.panel(3, 3, 314, 174, P.panel, P.line)
+  -- A binder on the desk: a page, with index tabs along its top.
+  UI.desk(0, 0, 320, 180)
   for i, page in ipairs(PAGES) do
     local on = i == g.bookPage
     local x = tabX(i)
-    UI.rect(x, 6, TABW, 10, on and P.line or P.panel2)
-    UI.textCenter(i .. ' ' .. page.title, x + TABW / 2, 8, on and P.text or P.dim)
+    if not on then
+      UI.rect(x + 1, 6, TABW, 10, P.dark, 0.3)
+      UI.rect(x, 5, TABW, 10, P.paperD)
+      UI.textCenter(i .. ' ' .. page.title, x + TABW / 2, 8, P.dim)
+    end
   end
-  UI.textRight('TAB CLOSES', 311, 8, P.faint)
+  UI.paper(3, 14, 314, 164, { margin = 4 })
+  for i, page in ipairs(PAGES) do
+    if i == g.bookPage then
+      local x = tabX(i)
+      UI.rect(x, 4, TABW, 11, P.paper)
+      UI.textCenter(i .. ' ' .. page.title, x + TABW / 2, 8, P.text)
+    end
+  end
+  UI.textRight('TAB CLOSES', 316, 7, P.paperL)
 
   local page = PAGES[g.bookPage]
   if page.cols then

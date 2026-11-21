@@ -1280,7 +1280,7 @@ end
 ---------------------------------------------------------------- drawing: overlays
 
 local function dim()
-  UI.rect(VX, VY, VW, VH, P.dark, 0.6)
+  UI.rect(VX, VY, VW, VH, P.dark, 0.4)
 end
 
 -- The item chooser of a filter: every item in the game, one click to set.
@@ -1293,16 +1293,16 @@ local function drawPicker(app)
   local w, h = PICK.cols * PICK.cell + 8, rows * PICK.cell + 34
   local x, y = floor(CX - w / 2), floor(VY + (VH - h) / 2)
   dim()
-  UI.panel(x, y, w, h, P.panel, P.line)
+  UI.paper(x, y, w, h)
   UI.text('FILTER: WHICH ITEM GOES STRAIGHT ON?', x + 4, y + 4, P.text)
   local hover
   for i, id in ipairs(Items.list) do
     local cx = x + 4 + ((i - 1) % PICK.cols) * PICK.cell
     local cy = y + 13 + floor((i - 1) / PICK.cols) * PICK.cell
     local hot = UI.inside(cx, cy, PICK.cell, PICK.cell)
-    if e.filter.item == id then UI.rect(cx, cy, PICK.cell, PICK.cell, P.line) end
+    if e.filter.item == id then UI.rect(cx, cy, PICK.cell, PICK.cell, P.paperD) end
     if hot then
-      UI.frame(cx, cy, PICK.cell, PICK.cell, P.amber)
+      UI.frame(cx, cy, PICK.cell, PICK.cell, P.dark)
       hover = id
     end
     UI.sprite(Sprites.item[id], cx + 3, cy + 3)
@@ -1332,9 +1332,11 @@ local function drawIntro(app)
   local w, h = 200, 132
   local x, y = floor(CX - w / 2), 22
   local cx = x + w / 2
-  UI.panel(x, y, w, h, P.panel, c.boss and P.red or P.line)
+  -- The contract's papers.
+  UI.paper(x, y, w, h, { form = 'FORM C-' .. c.index })
   UI.textCenter('CONTRACT ' .. c.index .. (c.index <= run:total() and (' OF ' .. run:total()) or ' (ENDLESS)'), cx, y + 5, P.dim)
-  UI.textCenter('QUOTA ' .. Fmt.money(c.quota), cx, y + 13, P.money, 2)
+  UI.textCenter('QUOTA ' .. Fmt.money(c.quota), cx, y + 13, P.text, 2)
+  if c.boss then UI.stamp('BOSS', x + 26, y + 17, P.red, 2, -0.25) end
   UI.textCenter(rules.shifts .. ' SHIFTS OF ' .. rules.shiftLen .. ' SECONDS', cx, y + 27, P.text)
   local yy = y + 37
   if c.index == 1 then
@@ -1367,8 +1369,11 @@ local function drawSummary(app)
   local w, h = 190, 138
   local x, y = floor(CX - w / 2), 19
   local cx = x + w / 2
-  UI.panel(x, y, w, h, P.panel, P.line)
-  UI.textCenter('SHIFT ' .. run.shiftsUsed .. ' COMPLETE', cx, y + 5, P.text)
+  -- A typed shift report.
+  UI.paper(x, y, w, h, { form = 'C-' .. c.index .. '/' .. run.shiftsUsed })
+  UI.text('SHIFT REPORT', x + 8, y + 4, P.text)
+  UI.textCenter('SHIFT ' .. run.shiftsUsed .. ' COMPLETE', cx, y + 4, P.dim)
+  UI.rect(x + 6, y + 11, w - 12, 1, P.dark)
 
   local order = {}
   for i, t in ipairs(s.order) do order[i] = t end
@@ -1401,7 +1406,7 @@ local function drawSummary(app)
       u >= Factory.BUSY and P.green or (u >= 0.5 and P.amber or P.red))
     yy = yy + 8
   end
-  UI.rect(x + 8, yy + 1, w - 16, 1, P.line)
+  UI.rect(x + 8, yy + 1, w - 16, 1, P.dark)
   yy = yy + 5
   -- End-of-shift mods stamp in one at a time, met or not.
   local r = g.reveal
@@ -1411,10 +1416,10 @@ local function drawSummary(app)
       if res.fired then
         local fresh = r.t - BEAT * i < STAMP
         local color = Fx.color(res.mod)
-        if fresh then UI.rect(x + 6, yy - 1, w - 12, 7, color) end
+        if fresh then UI.rect(x + 6, yy - 1, w - 12, 7, P.tint(color, 0.45)) end
         local amount = (res.label and (res.label .. '  ') or '') .. Fx.money(res.delta)
-        UI.text(res.mod.name, x + 8, yy, fresh and P.dark or color)
-        UI.textRight(amount, x + w - 8, yy, fresh and P.dark or color)
+        UI.text(res.mod.name, x + 8, yy, color)
+        UI.textRight(amount, x + w - 8, yy, color)
       else
         UI.text(res.mod.name, x + 8, yy, P.faint)
         UI.textRight('NOT MET', x + w - 8, yy, P.faint)
@@ -1436,6 +1441,11 @@ local function drawSummary(app)
   if s.status == 'cleared' then label, msg, color = 'COLLECT', 'QUOTA MET!', P.green
   elseif s.status == 'failed' then label, msg, color = 'END RUN', 'QUOTA MISSED', P.red end
   UI.text(msg, x + 8, by + 4, color)
+  -- The report is stamped.
+  local word, ink = 'FILED', P.blue
+  if s.status == 'cleared' then word, ink = 'QUOTA MET', P.green
+  elseif s.status == 'failed' then word, ink = 'SHORTFALL', P.red end
+  UI.stamp(word, x + w / 2 - 6, math.floor((yy + 8 + by) / 2), ink, 2, -0.1, 1, g.stampGrow)
   if UI.button(label, x + w - 68, by, 60, 13, { color = color == P.text and P.green or color }) then
     afterSummary(app)
   end
@@ -1447,11 +1457,14 @@ local function drawEnd(app, won)
   local w, h = 190, 90
   local x, y = floor(CX - w / 2), 43
   local cx = x + w / 2
-  UI.panel(x, y, w, h, P.panel, won and P.money or P.red)
-  if app.g.record then UI.textCenter('NEW RECORD: ' .. Records.contract .. ' CONTRACTS CLEARED', cx, y - 9, P.money) end
+  UI.paper(x, y, w, h, { form = 'FINAL' })
+  if app.g.record then
+    UI.rect(cx - 90, y - 12, 180, 10, P.paperL)
+    UI.textCenter('NEW RECORD: ' .. Records.contract .. ' CONTRACTS CLEARED', cx, y - 10, P.money)
+  end
   if won then
-    UI.textCenter('ALL QUOTAS MET', cx, y + 10, P.money, 2)
-    UI.textCenter('THE FACTORY IS YOURS.', cx, y + 28, P.text)
+    UI.stamp('APPROVED', cx, y + 15, P.green, 2, -0.06, 0.9, app.g.stampGrow)
+    UI.textCenter('ALL QUOTAS MET. THE FACTORY IS YOURS.', cx, y + 30, P.text)
     UI.textCenter('KEEP GOING AND THE QUOTAS KEEP GROWING,', cx, y + 39, P.dim)
     UI.textCenter('ON THE LAND YOU HAVE, UNTIL ONE IS MISSED.', cx, y + 46, P.dim)
     UI.textCenter('SEED ' .. run.seed, cx, y + 57, P.faint)
@@ -1462,7 +1475,7 @@ local function drawEnd(app, won)
     if UI.button('TITLE', cx + 4, y + h - 19, 70, 13) then app.toTitle() end
     return
   end
-  UI.textCenter('RUN OVER', cx, y + 10, P.red, 2)
+  UI.stamp('CONTRACT VOID', cx, y + 15, P.red, 2, -0.06, 0.9, app.g.stampGrow)
   if run.endless then
     UI.textCenter('ENDLESS: REACHED CONTRACT ' .. run.index, cx, y + 28, P.text)
   else

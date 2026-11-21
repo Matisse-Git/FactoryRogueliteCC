@@ -78,6 +78,118 @@ function UI.sprite(img, x, y, rot, alpha, flip, shade)
   end
 end
 
+---------------------------------------------------------------- paperwork
+
+-- The desk everything lies on: dark wood with a grain.
+function UI.desk(x, y, w, h)
+  UI.rect(x, y, w, h, P.desk)
+  for k = 0, math.floor(h / 4) do
+    local gy = y + 2 + k * 4 + (k * 7) % 3
+    local gx = x + (k * 53) % 70 - 30
+    while gx < x + w do
+      local len = 22 + (gx * 7 + k * 13) % 30
+      local x0 = math.max(gx, x)
+      UI.rect(x0, gy, math.min(x + w, gx + len) - x0, 1, P.deskD, 0.5)
+      gx = gx + len + 12 + (gx * 3 + k * 11) % 40
+    end
+  end
+end
+
+-- A sheet of paper with a drop shadow.
+--   opts.ruled  { first, every }: faint blue lines
+--   opts.margin x offset of a red margin line
+--   opts.holes  punched holes down the left edge (a binder page)
+--   opts.form   a form number, typed small in the top-right corner
+--   opts.face   another paper colour (a blueprint is blue)
+function UI.paper(x, y, w, h, opts)
+  opts = opts or {}
+  UI.rect(x + 2, y + 2, w, h, P.dark, 0.35)
+  UI.rect(x, y, w, h, opts.face or P.paper)
+  UI.rect(x, y + h - 1, w, 1, P.paperD)
+  UI.rect(x + w - 1, y, 1, h, P.paperD)
+  if opts.ruled then
+    for ry = y + opts.ruled[1], y + h - 4, opts.ruled[2] do UI.rect(x + 2, ry, w - 4, 1, P.blue, 0.1) end
+  end
+  if opts.margin then UI.rect(x + opts.margin, y + 1, 1, h - 2, P.red, 0.3) end
+  if opts.holes then
+    for hy = y + 10, y + h - 10, math.max(20, math.floor((h - 20) / 4)) do
+      UI.rect(x + 3, hy, 4, 4, P.desk)
+      UI.rect(x + 3, hy, 4, 1, P.deskD)
+    end
+  end
+  if opts.form then UI.textRight(opts.form, x + w - 4, y + 3, P.faint) end
+end
+
+-- The heading of a memo or form: typed, over a double rule.
+function UI.heading(text, x, y, w, color)
+  UI.text(text, x, y, color or P.text)
+  UI.rect(x, y + 7, w, 1, P.dark)
+  UI.rect(x, y + 9, w, 1, P.dark)
+end
+
+-- A rubber stamp: text in a border, the ink a little worn. Cached per text.
+local stamps = {}
+local function stampImage(text, scale)
+  local key = text .. '@' .. scale
+  if stamps[key] then return stamps[key] end
+  local b = scale                       -- border thickness
+  local pad = 2 * scale + b
+  local w, h = Font.width(text, scale) + 1 + 2 * pad, 5 * scale + 2 * pad
+  local canvas = love.graphics.newCanvas(w, h)
+  love.graphics.push('all')
+  love.graphics.setCanvas(canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.rectangle('fill', 0, 0, w, b)
+  love.graphics.rectangle('fill', 0, h - b, w, b)
+  love.graphics.rectangle('fill', 0, 0, b, h)
+  love.graphics.rectangle('fill', w - b, 0, b, h)
+  Font.print(text, pad, pad, scale)
+  love.graphics.pop()
+  local data = canvas:newImageData()
+  data:mapPixel(function(x, y, r, g, bb, a)
+    -- Worn ink: blotches where the pad ran dry, and a few specks.
+    local worn = scale > 1 and (love.math.noise(x * 0.3, y * 0.3) > 0.9 or (x * 31 + y * 17) % 37 == 0)
+      or love.math.noise(x * 0.5, y * 0.5) > 0.95
+    if a > 0 and worn then
+      return r, g, bb, 0
+    end
+    return 1, 1, 1, a > 0 and 1 or 0
+  end)
+  local img = love.graphics.newImage(data)
+  img:setFilter('nearest', 'nearest')
+  -- Where each letter starts, so the tilt can step between whole letters.
+  local cuts, cx = { 0 }, pad
+  for i = 2, #text do
+    cx = pad + Font.width(text:sub(1, i - 1) .. 'X', scale) - Font.width('X', scale)
+    cuts[#cuts + 1] = cx
+  end
+  cuts[#cuts + 1] = w
+  stamps[key] = { img = img, cuts = cuts }
+  return stamps[key]
+end
+
+-- Stamp `text` centred on (cx, cy), tilted by about `angle` radians. `grow`
+-- > 1 draws it bigger (a stamp coming down). The tilt steps letter by
+-- letter rather than rotating, so the letters stay whole at this resolution.
+local quad = nil
+function UI.stamp(text, cx, cy, color, scale, angle, alpha, grow)
+  local s = stampImage(text, scale or 2)
+  local img, cuts = s.img, s.cuts
+  local w, h = img:getDimensions()
+  local k = grow or 1
+  angle = angle or 0
+  quad = quad or love.graphics.newQuad(0, 0, 1, 1, 1, 1)
+  love.graphics.setColor(color[1], color[2], color[3], (alpha or 1) * 0.9)
+  local x0, y0 = cx - w * k / 2, cy - h * k / 2
+  for i = 1, #cuts - 1 do
+    local sx, sw = cuts[i], cuts[i + 1] - cuts[i]
+    local dy = math.floor(angle * (sx + sw / 2 - w / 2) + 0.5)
+    quad:setViewport(sx, 0, sw, h, w, h)
+    love.graphics.draw(img, quad, math.floor(x0 + sx * k), math.floor(y0 + dy * k), 0, k, k)
+  end
+end
+
 function UI.inside(x, y, w, h)
   return UI.mx >= x and UI.mx < x + w and UI.my >= y and UI.my < y + h
 end

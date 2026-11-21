@@ -111,10 +111,8 @@ end
 
 function Panel.draw(app)
   local rows, y, h = layout()
-  UI.rect(X + 2, y + 2, W, h, P.dark, 0.6)
-  UI.panel(X, y, W, h, P.panel, P.line)
-  UI.textCenter('SETTINGS', X + W / 2, y + 6, P.money)
-  UI.rect(X + 6, y + 15, W - 12, 1, P.line)
+  UI.paper(X, y, W, h, { form = 'MEMO' })
+  UI.heading('SETTINGS', X + 6, y + 5, W - 12)
 
   for _, row in ipairs(rows) do
     if row.kind == 'mode' then

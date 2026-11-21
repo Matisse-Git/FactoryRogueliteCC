@@ -116,7 +116,8 @@ local function drawOffer(app, i, o)
   local d = describe(run, o)
   local hot = UI.inside(x, y, w, h)
   local picking = shop.replace == i
-  UI.panel(x, y, w, h, o.sold and P.bg or P.panel, picking and P.amber or (hot and P.text or (o.sold and P.faint or P.line)))
+  UI.rect(x, y, w, h, hot and P.paperL or P.paper)
+  UI.frame(x, y, w, h, picking and P.amber or P.dark)
   d.icon(x + 4, y + 4)
   local ny = y + 4
   if d.label then
@@ -132,7 +133,7 @@ local function drawOffer(app, i, o)
   local by = y + h - 15
   local blocked = run:buyBlocked(i)
   if o.sold then
-    UI.textCenter('BOUGHT', x + w / 2, by + 4, P.faint)
+    UI.stamp('SOLD', x + w / 2, y + h / 2, P.red, 2, -0.12, 0.85)
   elseif blocked == 'slots full' then
     -- All five slots are taken: this one has to replace another.
     local label = picking and 'CANCEL' or ('REPLACE $' .. o.cost)
@@ -234,8 +235,11 @@ function Shop.draw(app)
   local run = app.run
   local shop = run.shop
 
-  UI.rect(0, 0, 320, 180, P.bg)
-  UI.text('SHOP', 8, 5, P.text, 2)
+  -- A page of the supplier's catalogue.
+  UI.desk(0, 0, 320, 180)
+  UI.paper(3, 2, 314, 176)
+  UI.rect(6, 16, 308, 1, P.dark)
+  UI.text('SUPPLY CATALOGUE', 8, 5, P.text, 2)
   UI.textRight('$' .. run.credits, 312, 5, P.money, 2)
   if UI.button('MENU', 146, 5, 27, 9) then app.openPause() end
   local p = run.lastPayout
