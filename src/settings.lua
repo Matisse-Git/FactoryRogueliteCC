@@ -4,7 +4,10 @@ local Settings = {
   -- The last pass over the picture: 'print' (paper grain and a slightly
   -- misregistered ink, like a printed page), 'crt' (an old screen) or 'off'.
   filter = 'print',
-  print = 50,          -- strength of the print filter
+  print = 50,          -- the one slider of the print filter's simple mode
+  printCustom = false, -- true: each part of the print filter has its own slider
+  printSeeded = false,
+  grain = 50, register = 50, ink = 50, edges = 50,
 
   -- CRT filter. Every strength is 0 (off) to 100 in steps of 10.
   crt = 50,            -- the one slider of the simple mode: drives every part
@@ -22,10 +25,21 @@ local Settings = {
 
 -- The parts of the CRT filter, in the order the settings panel lists them.
 Settings.PARTS = { 'scanlines', 'glow', 'vignette', 'fringe', 'bulge' }
+-- And of the print filter: paper grain, the ink plates out of register, the
+-- weight of dark ink, and the yellowed edges of the sheet.
+Settings.PRINT_PARTS = { 'grain', 'register', 'ink', 'edges' }
+
+-- Each filter's simple / custom mode: the switch, whether its parts have had
+-- their starting values, its parts and its one slider.
+local MODES = {
+  crt = { flag = 'custom', seeded = 'seeded', parts = Settings.PARTS, one = 'crt' },
+  print = { flag = 'printCustom', seeded = 'printSeeded', parts = Settings.PRINT_PARTS, one = 'print' },
+}
 
 local FILE = 'settings.txt'
-local NUMBERS = { 'crt', 'scanlines', 'glow', 'vignette', 'fringe', 'bulge', 'sound', 'music', 'print' }
-local SWITCHES = { 'custom', 'seeded', 'fullscreen', 'integer' }
+local NUMBERS = { 'crt', 'scanlines', 'glow', 'vignette', 'fringe', 'bulge', 'sound', 'music',
+  'print', 'grain', 'register', 'ink', 'edges' }
+local SWITCHES = { 'custom', 'seeded', 'printCustom', 'printSeeded', 'fullscreen', 'integer' }
 local CHOICES = { filter = { 'print', 'crt', 'off' } }
 Settings.FILTERS = CHOICES.filter
 local kind = {}
@@ -66,16 +80,22 @@ function Settings.set(key, value)
   Settings.save()
 end
 
--- Switch between the one slider and one slider per part. The first time,
--- the parts start from the one slider, so the picture does not jump; after
--- that the two keep their own values.
-function Settings.setCustom(on)
-  if on and not Settings.seeded then
-    for _, part in ipairs(Settings.PARTS) do Settings[part] = Settings.crt end
-    Settings.seeded = true
+-- Switch a filter ('crt' by default, or 'print') between the one slider and
+-- one slider per part. The first time, the parts start from the one slider,
+-- so the picture does not jump; after that the two keep their own values.
+function Settings.setCustom(on, filter)
+  local m = MODES[filter or 'crt']
+  if on and not Settings[m.seeded] then
+    for _, part in ipairs(m.parts) do Settings[part] = Settings[m.one] end
+    Settings[m.seeded] = true
   end
-  Settings.custom = on
+  Settings[m.flag] = on
   Settings.save()
+end
+
+-- Whether a filter ('crt' or 'print') is in its custom mode.
+function Settings.isCustom(filter)
+  return Settings[MODES[filter].flag]
 end
 
 -- The next filter in the list, after the current one.
@@ -96,6 +116,16 @@ function Settings.levels()
     levels[part] = on and (Settings.custom and Settings[part] or Settings.crt) / 100 or 0
   end
   return levels
+end
+
+-- Likewise for the print filter.
+local printLevels = {}
+function Settings.printLevels()
+  local on = Settings.filter == 'print'
+  for _, part in ipairs(Settings.PRINT_PARTS) do
+    printLevels[part] = on and (Settings.printCustom and Settings[part] or Settings.print) / 100 or 0
+  end
+  return printLevels
 end
 
 return Settings

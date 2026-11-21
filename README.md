@@ -183,7 +183,10 @@ A shift that was cut short is simply run again. The save is removed when the run
   build, a driving one while a shift runs, crossfading between them.
 - **Filter**: Print (the default), CRT or Off.
   - **Print**: the picture as a printed page: paper grain, the ink plates a fraction of a pixel
-    out of register, faintly yellowed edges. One strength slider, 50 by default.
+    out of register, dark ink a touch heavier, faintly yellowed edges. Like the CRT filter it
+    has a **Simple** mode (one strength slider, 50 by default) and a **Custom** mode with one
+    slider per part: paper grain, misregister, ink weight, yellow edges. Each filter keeps its
+    own mode and values.
 - **CRT** (when chosen): scanlines, a soft glow, darker corners, a faint colour fringe near the edges
   and a slight bulge. Nothing in it moves or flickers. Scanlines fade out when the picture is
   shown at less than 3×.

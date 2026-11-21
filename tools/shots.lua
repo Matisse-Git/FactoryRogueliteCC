@@ -708,8 +708,10 @@ return function(App)
 
     ---------------------------------------------------------- settings panel
     expect('crt: the filter is available', Crt.ok)
+    expect('print: the filter is available', Crt.print ~= nil)
     expect('settings: defaults', Settings.crt == 50 and Settings.integer
-      and Settings.filter == 'print' and Settings.print == 50 and Settings.music == 50)
+      and Settings.filter == 'print' and Settings.print == 50 and Settings.music == 50
+      and not Settings.printCustom)
     expect('settings: the print filter leaves the mouse alone', Crt.off(App.levels()))
     expect('a run that ended leaves nothing to continue', not App.hasSave())
     click(Title.at.records)
@@ -730,6 +732,32 @@ return function(App)
     wait(2)
     shot('19_settings')
     crtShot('19b_print_filter', 1280, 720)
+
+    -- The print filter, one slider per part.
+    click(Panel.stop(70, 'print'))
+    expect('print: the slider sets every part', Settings.printLevels().grain == 0.7 and Settings.printLevels().edges == 0.7)
+    click(Panel.at('mode'))
+    expect('print custom: the switch shows a slider per part',
+      Settings.printCustom and Panel.stop(0, 'grain') ~= nil and Panel.stop(0, 'print') == nil)
+    expect('print custom: the parts start from the one slider',
+      Settings.grain == 70 and Settings.register == 70 and Settings.ink == 70 and Settings.edges == 70)
+    click(Panel.stop(0, 'register'))
+    click(Panel.stop(100, 'grain'))
+    local pl = Settings.printLevels()
+    expect('print custom: a slider moves only its own part',
+      pl.grain == 1 and pl.register == 0 and pl.ink == 0.7 and Settings.print == 70)
+    expect('print custom: the CRT parts stay off', Crt.off(App.levels()))
+    App.move(300, 20)
+    wait(2)
+    shot('19c_print_custom')
+    crtShot('19d_print_custom', 1280, 720)
+    for _, part in ipairs(Settings.PRINT_PARTS) do click(Panel.stop(0, part)) end
+    expect('print custom: every part at 0 turns the filter off', Crt.off(Settings.printLevels()))
+    click(Panel.at('mode'))
+    expect('print custom: switching back keeps the one slider',
+      not Settings.printCustom and Settings.printLevels().grain == 0.7 and Settings.grain == 0)
+    expect('print custom: the CRT keeps its own mode', not Settings.custom)
+    click(Panel.stop(50, 'print'))
 
     click(Panel.at('filter'))
     expect('filter: the switch goes from print to CRT', Settings.filter == 'crt' and Panel.stop(0, 'crt') ~= nil)

@@ -2,8 +2,8 @@
 -- title screen button, or the pause menu). Kept narrow so the picture stays
 -- visible around it while the CRT sliders move.
 --
--- The CRT filter has two modes: SIMPLE is one strength slider for the whole
--- filter, CUSTOM is one slider per part.
+-- The print and CRT filters each have two modes: SIMPLE is one strength
+-- slider for the whole filter, CUSTOM is one slider per part.
 
 local P = require 'src.gfx.palette'
 local UI = require 'src.ui.ui'
@@ -19,6 +19,7 @@ local LABEL = {
   crt = 'STRENGTH', scanlines = 'SCANLINES', glow = 'GLOW',
   vignette = 'DARK CORNERS', fringe = 'COLOUR FRINGE', bulge = 'BULGE',
   sound = 'SOUND', music = 'MUSIC', print = 'STRENGTH',
+  grain = 'PAPER GRAIN', register = 'MISREGISTER', ink = 'INK WEIGHT', edges = 'YELLOW EDGES',
 }
 local FILTER = { print = 'PRINT', crt = 'CRT', off = 'OFF' }
 
@@ -34,14 +35,15 @@ local focus = 'print'        -- key of the slider the arrow keys move
 -- panel's top and height (it grows with the number of rows).
 local function layout()
   local rows = { { kind = 'slider', key = 'sound' }, { kind = 'slider', key = 'music' }, { kind = 'filter' } }
-  if Settings.filter == 'print' then
-    rows[#rows + 1] = { kind = 'slider', key = 'print' }
-  elseif Settings.filter == 'crt' then
+  local f = Settings.filter
+  if f ~= 'off' then
     rows[#rows + 1] = { kind = 'mode' }
-    if Settings.custom then
-      for _, part in ipairs(Settings.PARTS) do rows[#rows + 1] = { kind = 'slider', key = part } end
+    if Settings.isCustom(f) then
+      for _, part in ipairs(f == 'crt' and Settings.PARTS or Settings.PRINT_PARTS) do
+        rows[#rows + 1] = { kind = 'slider', key = part }
+      end
     else
-      rows[#rows + 1] = { kind = 'slider', key = 'crt' }
+      rows[#rows + 1] = { kind = 'slider', key = f }
     end
   end
   rows[#rows + 1] = { kind = 'fullscreen' }
@@ -130,12 +132,14 @@ function Panel.draw(app)
         focus = Settings.filter == 'crt' and 'crt' or 'print'
       end
     elseif row.kind == 'mode' then
-      UI.text('CRT MODE', X + 8, row.y, Crt.ok and P.text or P.faint)
-      if switch(Settings.custom and 'CUSTOM' or 'SIMPLE', row.y, Settings.custom, 40,
+      local f = Settings.filter
+      local custom = Settings.isCustom(f)
+      UI.text(f == 'crt' and 'CRT MODE' or 'PRINT MODE', X + 8, row.y, Crt.ok and P.text or P.faint)
+      if switch(custom and 'CUSTOM' or 'SIMPLE', row.y, custom, 40,
           { disabled = not Crt.ok, color = P.blue }) then
-        Settings.setCustom(not Settings.custom)
+        Settings.setCustom(not custom, f)
         dragging = nil
-        focus = Settings.custom and Settings.PARTS[1] or 'crt'
+        focus = Settings.isCustom(f) and (f == 'crt' and Settings.PARTS or Settings.PRINT_PARTS)[1] or f
       end
     elseif row.kind == 'slider' then
       drawSlider(row)
