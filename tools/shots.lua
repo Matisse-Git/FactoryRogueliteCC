@@ -303,6 +303,16 @@ return function(App)
     expect('and stops a little past the edge of the site', App.g.cam.x == m and App.g.cam.y == m)
     wait(1)
     shot('03g_scenery_corner')
+    -- Let the ambient life run for a while: trucks on the road, birds, clouds.
+    local Life = require 'src.ui.life'
+    for _ = 1, 160 do Life.update(App.g.life, 0.1, Game.lifeContext(App)) end
+    expect('life: animals live on the land around the site', #App.g.life.animals > 0)
+    expect('life: and workers on yours', #App.g.life.workers > 0)
+    expect('life: trucks drive the road', #App.g.life.trucks > 0)
+    if App.g.life.trucks[1] then App.g.life.trucks[1].x = 3 end
+    if App.g.life.clouds then App.g.life.clouds[1].x, App.g.life.clouds[1].y = -3, -2 end
+    wait(1)
+    shot('03i_life')
     Game.pan(App, 0, 4000)
     wait(1)
     shot('03h_scenery_other_side')

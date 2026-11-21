@@ -101,6 +101,16 @@ local function outside(L, u, v)
   return 'meadow'
 end
 
+-- What is at world pixel (u, v): 'owned' or 'wild' inside the site,
+-- otherwise 'water', 'sand', 'road', 'field', 'woods' or 'meadow'.
+function Terrain.groundAt(L, map, u, v)
+  local tx, ty = floor(u / 16), floor(v / 16)
+  if tx >= 0 and ty >= 0 and tx < W and ty < H then
+    return map:owned(tx, ty) and 'owned' or 'wild'
+  end
+  return outside(L, u, v)
+end
+
 ---------------------------------------------------------------- ground
 
 local function grass(u, v, s, wild)

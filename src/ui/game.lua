@@ -13,6 +13,7 @@ local UI = require 'src.ui.ui'
 local Fx = require 'src.ui.fx'
 local Particles = require 'src.ui.particles'
 local Art = require 'src.gfx.art'
+local Life = require 'src.ui.life'
 local Book = require 'src.ui.book'
 local Fmt = require 'src.fmt'
 local Sfx = require 'src.sfx'
@@ -115,6 +116,7 @@ function Game.enter(app)
     fx = Fx.new(),      -- card pops and tile flashes
     parts = old and old.run == run and old.parts or Particles.new(),   -- dust, smoke, leaves
     clear = nil,        -- { sx, sy, t }: new land being cleared
+    life = old and old.run == run and old.life or Life.new(),   -- workers, trucks, animals
     reveal = nil,       -- summary playback, see finishShift
     lit = {},           -- mods changing a machine on the board this frame
     hoverMod = nil,     -- the upgrade whose card is under the mouse
@@ -492,12 +494,28 @@ local function updateSmoke(app, dt)
   end
 end
 
+-- What the ambient life needs to know about the factory this frame.
+function Game.lifeContext(app)
+  local g, run = app.g, app.run
+  g.layout = g.layout or Terrain.layout(run.seed or 1)
+  local F = run.factory
+  local live = g.mode == 'run'
+  local boss = run:contract().boss
+  return {
+    run = run, F = F, map = run.map, layout = g.layout, live = live,
+    rate = (live and F.shift.tick > 0) and F.shift.revenue / F.shift.tick or 0,
+    boss = boss, bossId = boss and boss.id, parts = g.parts,
+  }
+end
+
 function Game.update(app, dt)
   local g = app.g
   Fx.update(g.fx, dt)
   Particles.update(g.parts, dt)
   updateClearing(g, dt)
   updateSmoke(app, dt)
+  g.lifeCtx = Game.lifeContext(app)
+  Life.update(g.life, (g.mode == 'run' and g.paused) and 0 or dt, g.lifeCtx)
   if g.mode == 'summary' then advanceReveal(g, dt) end
   if g.mode == 'run' and not g.paused then
     g.acc = g.acc + dt * TPS * g.speed
@@ -581,6 +599,7 @@ local function drawPiece(S, T, b, x, y, alpha, item, hasOutput, img, shade)
 end
 
 local clock = 0          -- seconds, for animation (set by drawBoard)
+local dryItem = nil      -- a drought's raw item: its ports stand still
 local ANIM_FPS = 6
 local IDLE_SHADE = 0.78
 
@@ -594,7 +613,7 @@ local function drawBuilding(S, T, e, x, y, live)
     local frames = S.anim[b.kind]
     local img, shade
     if live and frames then
-      if (m and m.status == 'work') or e.port then
+      if (m and m.status == 'work') or (e.port and e.port.item ~= dryItem) then
         img = frames[floor(clock * ANIM_FPS + e.pos.x * 3 + e.pos.y * 5) % #frames + 1]
       elseif m then
         shade = IDLE_SHADE
@@ -661,6 +680,8 @@ local function drawBoard(app)
   local S = Sprites.set[T]
   local big = T == 16
   clock = app.time
+  local life = g.lifeCtx or Game.lifeContext(app)
+  dryItem = life.bossId == 'drought' and life.boss.params.item or nil
 
   love.graphics.setScissor(VX, VY, VW, VH)
 
@@ -797,6 +818,8 @@ local function drawBoard(app)
     end
   end
 
+  Life.drawGround(g.life, VX - cam.x, VY - cam.y, T, life)
+
   -- Machines changed by a speed or draw mod where they stand carry a pip per
   -- mod, while building too: these upgrades are placement puzzles. Hovering
   -- the upgrade's card outlines its machines.
@@ -841,6 +864,7 @@ local function drawBoard(app)
   end
 
   Particles.draw(g.parts, VX - cam.x, VY - cam.y, T)
+  Life.drawSky(g.life, VX - cam.x, VY - cam.y, T, life, VX, VY, VW, VH)
   Fx.drawFlashes(g.fx, VX - cam.x, VY - cam.y, T)
 
   local overlay = g.mode == 'intro' or g.mode == 'summary' or g.mode == 'over' or g.mode == 'win'
