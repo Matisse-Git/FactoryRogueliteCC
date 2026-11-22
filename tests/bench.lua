@@ -20,9 +20,7 @@ local layout = require 'tests.layout'
 local Route = require 'tests.route'
 local Plan = require 'tests.plan'
 local Rules = require 'src.rules'
-local Rng = require 'src.rng'
 local Run = require 'src.run'
-local Market = require 'src.market'
 local Fmt = require 'src.fmt'
 local Items = require 'src.data.items'
 local Machines = require 'src.data.machines'
@@ -192,7 +190,6 @@ local function referenceRun(profile)
   local levels, credits, nextBlueprint = {}, Contracts.startCredits, 1
   local topItem
   local rows = {}
-  local rng = Rng.new(99)
 
   local function unlock()
     local kind = profile.order[nextBlueprint]
@@ -261,25 +258,11 @@ local function referenceRun(profile)
       return v
     end
 
-    -- The better of two offered markets, averaged over a dozen rolls.
-    local total, lines = 0, nil
-    local rolls = 12
-    for _ = 1, rolls do
-      local best, bestLines
-      for offer = 1, (k == 1 and 1 or 2) do
-        local slump
-        if sector >= 2 then slump = (offer == 1 and topItem) or 'random' end
-        local market = Market.roll(rng, { resources = resources, owned = kinds, sector = sector, easy = k == 1, slump = slump })
-        local revenue, l = Plan.best({
-          kinds = kinds, watts = watts, ports = ports, value = value, polish = kinds.polisher,
-          demand = market.demand, slump = market.slump,
-        })
-        if not best or revenue > best then best, bestLines = revenue, l end
-      end
-      total = total + best
-      lines = bestLines
-    end
-    local revenue = total / rolls
+    -- The best factory the site can run. Prices never move, so it is the
+    -- same factory, grown, from one contract to the next.
+    local revenue, lines = Plan.best({
+      kinds = kinds, watts = watts, ports = ports, value = value, polish = kinds.polisher,
+    })
     if k % Contracts.perSector == 0 then revenue = revenue * BOSS_COST end
     topItem = lines[1] and lines[1].item or topItem
     rows[k] = { revenue = revenue, top = topItem, watts = watts }

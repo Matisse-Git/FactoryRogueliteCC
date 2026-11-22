@@ -1,6 +1,7 @@
 -- The contract board, between a cleared contract and the shop: two offers,
--- each a plot of land and a market. You see both in full before choosing,
--- and you shop knowing what you chose.
+-- each the plot of land it adds, and what that land would let the factory
+-- make. You see both in full before choosing, and you shop knowing what you
+-- chose.
 
 local P = require 'src.gfx.palette'
 local Font = require 'src.gfx.font'
@@ -9,7 +10,7 @@ local UI = require 'src.ui.ui'
 local Fmt = require 'src.fmt'
 local Land = require 'src.ui.land'
 local Map = require 'src.map'
-local Market = require 'src.market'
+local Reach = require 'src.reach'
 local Items = require 'src.data.items'
 local Machines = require 'src.data.machines'
 local Alternates = require 'src.data.alternates'
@@ -27,31 +28,31 @@ local function take(app, i)
   app.save()
 end
 
--- The rows of a market: used here and in the game's intro panel.
--- Returns the y below the last row.
-function Board.marketRows(run, market, plot, x, y, w)
-  local resources, owned = run:resources(plot), run:kinds()
-  for _, d in ipairs(market.demand) do
-    UI.sprite(Sprites.item[d.item], x, y)
-    UI.text(Items[d.item].name, x + 11, y + 2, P.text)
-    UI.textRight('X' .. d.mult .. '  FIRST ' .. d.units, x + w, y + 2, P.green)
-    y = y + 9
-    local missing = Market.missing(d.item, resources, owned)
-    if missing == nil then
-      UI.text('NOTHING ON THIS SITE MAKES IT', x + 11, y, P.faint)
-      y = y + 7
-    elseif #missing > 0 then
-      local names = {}
-      for i, kind in ipairs(missing) do names[i] = Machines[kind].name end
-      y = UI.paragraph('NEEDS ' .. table.concat(names, ', '), x + 11, y, math.floor((w - 11) / 4), P.faint)
-    end
+-- What a plot would let the factory make that it cannot today: up to three
+-- products now, best paying first, and what more blueprints would add.
+local function opensRows(run, plot, x, y, w)
+  local now, later = Reach.opens(run, plot)
+  UI.text('OPENS UP', x, y, P.green)
+  y = y + 8
+  if #now == 0 then
+    y = UI.paragraph('NOTHING NEW: MORE OF WHAT YOUR FACTORY RUNS ON.', x, y, math.floor(w / 4), P.dim) + 2
   end
-  if market.slump then
-    local s = market.slump
-    UI.sprite(Sprites.item[s.item], x, y)
-    UI.text(Items[s.item].name, x + 11, y + 2, P.text)
-    UI.textRight('SLUMP X' .. Fmt.dec(s.mult), x + w, y + 2, P.red)
+  for i = 1, math.min(3, #now) do
+    local id = now[i]
+    UI.sprite(Sprites.item[id], x, y)
+    UI.text(Items[id].name, x + 11, y + 2, P.text)
+    UI.textRight(Fmt.money(Items[id].value), x + w, y + 2, P.money)
     y = y + 9
+  end
+  if #now > 3 then
+    UI.text('AND ' .. (#now - 3) .. ' MORE', x + 11, y, P.dim)
+    y = y + 8
+  end
+  if #later > 0 then
+    local names = {}
+    for i = 1, math.min(2, #later) do names[i] = Items[later[i]].name end
+    if #later > 2 then names[#names + 1] = '...' end
+    y = UI.paragraph('WITH MORE BLUEPRINTS: ' .. table.concat(names, ', '), x, y + 1, math.floor(w / 4), P.faint)
   end
   return y
 end
@@ -85,13 +86,8 @@ local function drawCard(app, i, offer)
     UI.text('THE SITE IS FULL.', x + 75, y + 5, P.faint)
   end
 
-  -- The market.
-  UI.text('IN DEMAND', x + 5, y + 58, P.green)
-  Board.marketRows(run, offer.market, plot, x + 5, y + 66, w - 10)
-
-  if offer.bonus > 0 then
-    UI.stamp('+' .. offer.bonus .. ' CREDITS', x + 36, y + h - 30, P.money, 1, 0)
-  end
+  -- What the land would let the factory make.
+  if plot then opensRows(run, plot, x + 5, y + 58, w - 10) end
   -- Signed at the bottom.
   UI.text('SIGNED', x + 5, y + h - 10, P.faint)
   UI.rect(x + 31, y + h - 5, w - 92, 1, P.dark)
@@ -163,7 +159,7 @@ function Board.draw(app)
       UI.tip = { title = c.boss.name, color = P.red, lines = { c.boss.desc } }
     end
   else
-    UI.textRight('CHOOSE ONE: ITS LAND AND ITS MARKET', 312, 20, P.faint)
+    UI.textRight('CHOOSE ONE: THE LAND IT ADDS TO YOUR SITE', 312, 20, P.faint)
   end
   for i, offer in ipairs(run.offers) do drawCard(app, i, offer) end
   if UI.tip then UI.drawTip(UI.tip, UI.mx, UI.my) end

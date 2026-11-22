@@ -145,9 +145,9 @@ Bosses.list = {
   },
   {
     id = 'glut', name = 'Glut',
-    desc = function() return 'Nothing is in demand: no product pays a bonus.' end,
+    desc = function() return 'The warehouses are full: everything sells for 30% less.' end,
     hooks = function()
-      return { setup = function(r) r.noDemand = true end }
+      return { value = function(s, ctx) ctx.value = ctx.value * 0.7 end }
     end,
   },
   {

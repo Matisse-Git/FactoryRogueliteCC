@@ -379,13 +379,12 @@ return function()
     -- The next contract comes with a plot, placed in a slot touching your land.
     run.progress = 0
     local offers = run:rollOffers()
-    check('two contracts are on offer, each with land and a market',
-      #offers == 2 and offers[1].plot ~= nil and offers[2].plot ~= nil
-      and #offers[1].market.demand == 2 and offers[1].plot ~= offers[2].plot)
+    check('two contracts are on offer, each with the land it adds and nothing else',
+      #offers == 2 and offers[1].plot ~= nil and offers[2].plot ~= nil and offers[1].plot ~= offers[2].plot
+      and offers[1].market == nil and offers[1].bonus == nil)
     check('choosing takes one of them', run:choose(2) and run.chosen == offers[2] and not run:choose(3))
     run:advance()
-    check('the chosen contract brings its market', run.index == 2 and run.market == offers[2].market
-      and run.rules.mods[1].market == offers[2].market and run.offers == nil)
+    check('the chosen contract moves the run on', run.index == 2 and run.offers == nil)
     local plot = run.pendingPlot
     check('and its land', plot == offers[2].plot)
     check('contract 2 offers a plot with ports', plot ~= nil and #plot.ports >= 1)
@@ -539,12 +538,11 @@ return function()
     check('37 items in 5 tiers', n == 37 and Items.computer.tier == 5 and Items.iron_ore.tier == 1, n)
   end
 
-  -- 10h. Markets, quotas and payouts.
+  -- 10h. Prices, quotas and payouts.
   do
-    local Market = require 'src.market'
+    local Reach = require 'src.reach'
     local Fmt = require 'src.fmt'
-    local Items = require 'src.data.items'
-    local layout = require 'tests.layout'
+    local Map = require 'src.map'
     local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
     local function straight(item)
       local F = Factory.new()
@@ -559,93 +557,52 @@ return function()
     for i = 2, #q do
       steady = steady and q[i] / q[i - 1] > 1.6 and (i == 2 or q[i] / q[i - 1] <= q[i - 1] / q[i - 2] + 1e-9)
     end
-    check('12 quotas from $120 to $2.2M, each at least 1.6x the last, the steps never steeper',
-      #q == 12 and q[1] == 120 and q[12] == 2200000 and steady)
-    check('endless mode keeps growing at 2x', Contracts.quota(13) == 4400000 and Contracts.quota(14) == 8800000,
+    check('12 quotas from $120 to $1.8M, each at least 1.6x the last, the steps never steeper',
+      #q == 12 and q[1] == 120 and q[12] == 1800000 and steady)
+    check('endless mode keeps growing at 2x', Contracts.quota(13) == 3600000 and Contracts.quota(14) == 7200000,
       Contracts.quota(13) .. ' ' .. Contracts.quota(14))
     check('big numbers are written short',
       Fmt.num(950) == '950' and Fmt.num(9999) == '9999' and Fmt.num(12345) == '12.3K'
       and Fmt.num(5000000) == '5M' and Fmt.num(1234567) == '1.23M' and Fmt.money(2500000000) == '$2.5B',
       Fmt.num(12345) .. ' ' .. Fmt.num(5000000) .. ' ' .. Fmt.num(1234567))
 
-    -- Demand has volume: x3 on the first N units a shift, then the normal price.
-    local market = { demand = { { item = 'gear', mult = 3, units = 10 } } }
-    local mod = Market.mod(market)
-    local s = runShift(straight('gear'), Rules.new({ mod }))
-    check('demand pays x3 on the first 10 gears, then $8 (10 x 24 + 20 x 8)', s.total == 400, soldString(s))
-    check('the ledger credits the market', math.abs(s.ledger[mod].delta - 160) < 1e-6 and s.ledger[mod].n == 10,
-      s.ledger[mod].delta)
-    s = runShift(straight('gear'), Rules.new({ mod }))
-    check('demand starts afresh every shift', s.total == 400, soldString(s))
-    s = runShift(straight('plate'), Rules.new({ mod }))
-    check('other products sell at the normal price', s.total == 240 and s.ledger[mod].n == 0, soldString(s))
-
-    local slump = Market.mod({ demand = {}, slump = { item = 'gear', mult = 0.5 } })
-    s = runShift(straight('gear'), Rules.new({ slump }))
-    check('a slump halves every unit (30 gears at $4)', s.total == 120 and s.ledger[slump].delta < 0, soldString(s))
-
-    -- A crate can straddle the edge of the demand.
+    -- No market: an item sells at its own value, every shift, every contract.
+    local s = runShift(straight('gear'), Rules.new({}))
+    check('30 gears sell for $8 each', s.total == 240, soldString(s))
+    s = runShift(straight('gear'), Rules.new({}))
+    check('and again the next shift', s.total == 240, soldString(s))
     local F = Factory.new()
     F:place('port', 0, 2, 0, { item = 'gear' })
     F:place('packer', 1, 2, 0)
     F:place('export', 2, 2, 2)
-    s = runShift(F, Rules.new({ Market.mod({ demand = { { item = 'gear', mult = 3, units = 6 } } }) }))
+    s = runShift(F, Rules.new({}))
     local crates = count(s, 'gear') / 4
-    check('a crate of 4 with 2 units of demand left pays x3 on those 2 ($105.60, $70.40, then $35.20 each)',
-      crates >= 7 and math.abs(s.exact - (105.6 + 70.4 + (crates - 2) * 35.2)) < 1e-6, soldString(s))
+    check('a crate of 4 gears sells for $35.20', crates >= 7 and math.abs(s.exact - crates * 35.2) < 1e-6, soldString(s))
 
     -- What a site can make, and what it would take.
     local res = { iron_ore = true, copper_ore = true }
     local own = { smelter = true, press = true }
-    local reach = Market.closure(res, own)
+    local reach = Reach.closure(res, own)
     check('reach: smelter + press on iron and copper make gears and plates, not wire',
       reach.gear and reach.plate and reach.iron_ingot and not reach.wire and not reach.motor)
-    local missing = Market.missing('motor', res, own)
+    local missing = Reach.missing('motor', res, own)
     check('a motor would need the wire mill and the assembler',
       #missing == 2 and missing[1] == 'wiremill' and missing[2] == 'assembler', table.concat(missing, ','))
-    check('steel cannot be made without coal', Market.missing('steel', res, own) == nil)
-    check('demand grows with the sector and shrinks with the tier',
-      Market.units('gear', 1) == 24 and Market.units('gear', 2) == 48 and Market.units('motor', 1) == 12
-      and Market.units('wire', 1) == 48 and Market.units('computer', 4) == 30 and Market.units('computer', 5) == 45)
+    check('steel cannot be made without coal', Reach.missing('steel', res, own) == nil)
 
-    local rng = require('src.rng').new(9)
-    local ok = true
-    for _ = 1, 30 do
-      local m = Market.roll(rng, { resources = res, owned = own, sector = 1, easy = true })
-      ok = ok and #m.demand == 2 and m.demand[1].item ~= m.demand[2].item and m.slump == nil
-      for _, d in ipairs(m.demand) do ok = ok and reach[d.item] and Items[d.item].tier >= 2 end
-    end
-    check('the first contract only asks for what the starting kit makes', ok)
-    local stretched = 0
-    for _ = 1, 30 do
-      local m = Market.roll(rng, { resources = res, owned = own, sector = 2, slump = 'random' })
-      ok = ok and reach[m.demand[1].item] and m.slump ~= nil and reach[m.slump.item]
-        and m.slump.item ~= m.demand[1].item and m.slump.item ~= m.demand[2].item
-      if not reach[m.demand[2].item] then stretched = stretched + 1 end
-    end
-    check('later contracts: one demand within reach, one to stretch for, one slump', ok and stretched == 30, stretched)
-
-    -- A run: its first market, the choice, the payout.
+    -- What new land opens up: the contract board shows it.
     local run = Run.new(21)
-    check('a run opens with a market of two reachable products',
-      run.market ~= nil and #run.market.demand == 2 and run.rules.mods[1].market == run.market)
-    run.soldValue = { gear = 500, plate = 200 }
-    check('the top seller is tracked', run:topSeller() == 'gear')
-    run.index = 3
-    local offers = run:rollOffers()
-    check('from sector 2 on, something slumps on every offer',
-      offers[1].market.slump ~= nil and offers[2].market.slump ~= nil)
-    check('on the first offer it is your best seller, unless that is in demand',
-      offers[1].market.slump.item == 'gear' or offers[1].market.demand[1].item == 'gear'
-      or offers[1].market.demand[2].item == 'gear', offers[1].market.slump.item)
-    local stretch = 0
-    for _, d in ipairs(offers[1].market.demand) do
-      local miss = Market.missing(d.item, run:resources(offers[1].plot), run:kinds())
-      if miss and #miss > 0 then stretch = stretch + 1 end
-    end
-    check('an offer that needs a machine you lack pays more', offers[1].bonus == stretch * 2, offers[1].bonus)
+    local quartz = Map.generate(require('src.rng').new(3), { items = { 'quartz' }, rocks = 0 })
+    local now, later = Reach.opens(run, quartz)
+    local has = {}
+    for _, id in ipairs(later) do has[id] = true end
+    check('quartz land opens up lenses and glass, dearest first', now[1] == 'lens' and now[2] == 'glass' and #now == 2,
+      table.concat(now, ','))
+    check('and lamps, with more blueprints', has.lamp and not has.lens, table.concat(later, ','))
+    local iron = Map.generate(require('src.rng').new(3), { items = { 'iron_ore' }, rocks = 0 })
+    check('more of an ore you have opens up nothing new', #Reach.opens(run, iron) == 0)
 
-    run.index, run.credits, run.shiftsUsed, run.bonus = 1, 0, 1, 0
+    run.index, run.credits, run.shiftsUsed = 1, 0, 1
     run:refreshRules()
     run.progress = Contracts.quota(1) * 4
     local p = run:payout()
@@ -657,7 +614,6 @@ return function()
   -- 10i. Bosses, their reward, and endless mode.
   do
     local Bosses = require 'src.data.bosses'
-    local Market = require 'src.market'
     local Map = require 'src.map'
     local layout = require 'tests.layout'
     local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
@@ -713,9 +669,8 @@ return function()
     check('Drought: the port supplies nothing', s.total == 0, soldString(s))
     s = runShift(layout({ 'I> s> E<' }), Rules.new({ boss('strike', { kind = 'smelter' }) }))
     check('Strike: the smelter makes half (7 or 8 ingots)', count(s, 'iron_ingot') >= 7 and count(s, 'iron_ingot') <= 8, soldString(s))
-    local market = Market.mod({ demand = { { item = 'gear', mult = 3, units = 10 } } })
-    s = runShift(straight('gear'), Rules.new({ market, boss('glut') }))
-    check('Glut: demand pays nothing extra', s.total == 240, soldString(s))
+    s = runShift(straight('gear'), Rules.new({ boss('glut') }))
+    check('Glut: everything sells for 30% less (30 gears at $5.60)', s.total == 168, soldString(s))
     F = layout({ 'I> s> E<' })
     runShift(F, Rules.new({ boss('surge') }))
     check('Surge Pricing: machines draw 50% more', F:at(1, 0).machine.draw == 4.5)
@@ -778,13 +733,11 @@ return function()
     run.index = 12
     run:afterContract()
     check('clearing contract 12 wins the run and still offers a 13th',
-      run.won and #run.offers == 2 and run:contract(13).quota == 4400000)
+      run.won and #run.offers == 2 and run:contract(13).quota == 3600000)
     run:choose(1)
     run:advance()
     check('endless contracts keep their bosses', run.index == 13 and run:contract().sectorBoss ~= nil
       and run:contract(15).isBoss and run:contract(15).sector == 5)
-    check('and their demand keeps growing', Market.units('gear', 5) == 180 and Market.units('gear', 6) == 270,
-      Market.units('gear', 5))
   end
 
   -- 10j. Saving a run and picking it up again.
@@ -809,10 +762,10 @@ return function()
         local b = e.building
         pieces[#pieces + 1] = b.kind .. e.pos.x .. ',' .. e.pos.y .. ',' .. b.dir
           .. (e.port and (e.port.item .. e.port.period) or '') .. (e.filter and tostring(e.filter.item) or '')
+          .. (e.machine and ('@' .. e.machine.age) or '')
       end
       table.sort(pieces)
       parts[#parts + 1] = table.concat(pieces, ' ')
-      for _, d in ipairs(run.market.demand) do parts[#parts + 1] = d.item .. d.units end
       for _, id in ipairs(run.upgrades) do parts[#parts + 1] = id end
       for _, id in ipairs(run.recipes) do parts[#parts + 1] = id end
       for _, m in ipairs(run.rules.mods) do parts[#parts + 1] = m.id end
@@ -828,7 +781,6 @@ return function()
       local parts = {}
       for _, o in ipairs(run:rollOffers()) do
         for _, p in ipairs(o.plot and o.plot.ports or {}) do parts[#parts + 1] = p.item .. p.x .. p.y end
-        for _, d in ipairs(o.market.demand) do parts[#parts + 1] = d.item end
       end
       run:openShop()
       for _, o in ipairs(run.shop.offers) do parts[#parts + 1] = o.id end
@@ -863,6 +815,11 @@ return function()
 
     local copy = Run.restore(Save.decode(Save.encode(run:snapshot())))
     check('a restored run is the same run', describe(copy) == describe(run), describe(copy))
+    local aged = 0
+    for _, e in ipairs(copy.factory.world:query('machine')) do
+      if e.machine.age == 1 then aged = aged + 1 end
+    end
+    check('down to how long each machine has stood (one shift)', aged > 0)
     check('down to the land, the rubble, the premium face and what is on offer',
       copy.map.count == run.map.count and copy.map.premium == 1 and #copy.factory.world:query('rubble') == 3
       and #copy.offers == 2 and copy.chosen == copy.offers[1] and #copy.shop.offers == #run.shop.offers
@@ -1021,7 +978,6 @@ return function()
   do
     local Investments = require 'src.data.investments'
     local Alternates = require 'src.data.alternates'
-    local Market = require 'src.market'
     local layout = require 'tests.layout'
     local U = Upgrades.byId
     local function count(s, t) return s.sold[t] and s.sold[t].n or 0 end
@@ -1103,13 +1059,19 @@ return function()
     s = runShift(layout({ 'I> s> b> b> E<' }), rules('short_haul'))
     check('and pays +40% within 3', near(s.exact, 15 * 3 * 1.4), s.exact)
 
-    local market = Market.mod({ demand = { { item = 'gear', mult = 3, units = 10 } }, slump = { item = 'plate', mult = 0.5 } })
-    s = runShift(straight('gear'), Rules.new({ market, U.bull_run }))
-    check('Bull Run: demand pays x4 (10 x 32 + 20 x 8)', s.total == 480, soldString(s))
-    s = runShift(straight('gear'), Rules.new({ market, U.cornered_market }))
-    check('Cornered Market: demand never runs out (30 x 24)', s.total == 720, soldString(s))
-    s = runShift(straight('plate'), Rules.new({ market, U.contrarian }))
-    check('Contrarian: the slump pays double (30 x 16)', s.total == 480, soldString(s))
+    -- Every 5 gears already sold add 2%: 8 x (30 + 0.02 x 5 x (0 + 1 + 2 + 3 + 4 + 5)).
+    s = runShift(straight('gear'), rules('mass_production'))
+    check('Mass Production: +2% per 5 of a product already sold ($252)', near(s.exact, 252), s.exact)
+    s = runShift(straight('gear'), rules('flagship'))
+    check('Flagship: the best seller pays out again', s.total == 480 and s.mult == 2, soldString(s))
+    F = layout({ 'I> s> E<' })
+    local made = {}
+    for i = 1, 4 do made[i] = count(runShift(F, rules('old_faithful')), 'iron_ingot') end
+    check('Old Faithful: a smelter speeds up once it has worked 3 shifts where it stands',
+      made[1] == 15 and made[3] == 15 and made[4] >= 18 and F:at(1, 0).machine.age == 4, table.concat(made, ' '))
+    F:remove(1, 0)
+    F:place('smelter', 1, 0, 0)
+    check('a machine put down again starts from nothing', F:at(1, 0).machine.age == 0)
 
     F = straight('gear')
     F:beginShift(rules('night_shift'), { shiftNo = 1 })

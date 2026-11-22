@@ -249,7 +249,6 @@ function Shop.draw(app)
     if p.unused > 0 then parts[#parts + 1] = 'SHIFTS LEFT ' .. p.unused end
     if p.interest > 0 then parts[#parts + 1] = 'INTEREST ' .. p.interest end
     if p.overshoot > 0 then parts[#parts + 1] = Fmt.dec(math.floor(p.times * 10) / 10) .. 'X QUOTA ' .. p.overshoot end
-    if p.stretch > 0 then parts[#parts + 1] = 'HARD MARKET ' .. p.stretch end
     UI.text('PAID $' .. p.total .. ':  ' .. table.concat(parts, ' + '), 8, 21, P.dim)
   end
 
@@ -269,33 +268,11 @@ function Shop.draw(app)
   drawOwned(app)
   drawAssets(app)
 
-  -- What comes next: the contract you chose, and what it wants.
+  -- What comes next: the quota, and the boss if there is one.
   local nc = run:contract(run.index + 1)
   local nextLabel = 'NEXT: ' .. Fmt.money(nc.quota)
   UI.text(nextLabel, 8, 168, P.dim)
   local nx = 8 + Font.width(nextLabel) + 6
-  local chosen = run.chosen or (run.offers and run.offers[1])
-  if chosen then
-    for _, d in ipairs(chosen.market.demand) do
-      UI.sprite(Sprites.item[d.item], nx, 166)
-      UI.text('X' .. d.mult, nx + 10, 168, P.green)
-      if UI.inside(nx, 165, 22, 10) then
-        UI.tip = { title = Items[d.item].name, color = P.green, lines = {
-          'IN DEMAND NEXT CONTRACT: X' .. d.mult .. ' ON THE FIRST ' .. d.units .. ' SOLD EACH SHIFT.' } }
-      end
-      nx = nx + 24
-    end
-    if chosen.market.slump then
-      local s = chosen.market.slump
-      UI.sprite(Sprites.item[s.item], nx, 166)
-      UI.text('X' .. Fmt.dec(s.mult), nx + 10, 168, P.red)
-      if UI.inside(nx, 165, 28, 10) then
-        UI.tip = { title = Items[s.item].name, color = P.red, lines = {
-          'SLUMPS NEXT CONTRACT: SELLS FOR X' .. Fmt.dec(s.mult) .. '.' } }
-      end
-      nx = nx + 30
-    end
-  end
   if nc.boss then
     UI.text('BOSS: ' .. nc.boss.name, nx, 168, P.red)
     if UI.inside(nx, 165, 80, 10) then

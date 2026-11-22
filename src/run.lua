@@ -1,12 +1,15 @@
 -- One run: the site and its factory, blueprints, upgrades, credits and
 -- contract progress.
 --
--- Between contracts: payout -> choose one of two offers (land + market) ->
+-- Between contracts: payout -> choose one of two offers (the land to add) ->
 -- shop -> advance -> place the land -> build.
+--
+-- Items always sell at their own value: no market moves under the factory,
+-- so a factory that works keeps working. What changes it is what the run
+-- buys (blueprints, modules, investments), the land it adds and the bosses.
 
 local Factory = require 'src.sim.factory'
 local Map = require 'src.map'
-local Market = require 'src.market'
 local Rules = require 'src.rules'
 local Rng = require 'src.rng'
 local Machines = require 'src.data.machines'
@@ -24,7 +27,6 @@ function Run.new(seed)
   r.seed = seed
   r.layoutRng = Rng.new(seed * 7 + 1)
   r.shopRng = Rng.new(seed * 13 + 5)
-  r.marketRng = Rng.new(seed * 17 + 3)
   r.credits = Contracts.startCredits
   r.blueprints = {}          -- machine kinds unlocked for the run
   for _, kind in ipairs(Contracts.startBlueprints) do r.blueprints[kind] = true end
@@ -34,7 +36,6 @@ function Run.new(seed)
   r.index = 1                -- current contract
   r.progress = 0             -- revenue banked on the current contract
   r.shiftsUsed = 0
-  r.soldValue = {}           -- item -> revenue on the current contract
   r.won, r.lost = false, false
   r.shop = nil
 
@@ -56,10 +57,6 @@ function Run.new(seed)
   r.bossRng:shuffle(r.finalOrder)
   r.bosses = {}              -- sector -> boss mod, once revealed
 
-  -- The first contract has no choice: a market the starting kit can fill.
-  r.market = Market.roll(r.marketRng, {
-    resources = r:resources(), owned = r:kinds(), sector = 1, easy = true,
-  })
   r:startContract()
   return r
 end
@@ -136,14 +133,12 @@ function Run:basePower()
 end
 
 -- Active rule set, in the order the rules apply to a sale: the site's own
--- rules, investments, the market, alternate recipes, modules left to right,
--- then the boss twist. A product in demand is tripled after its material
--- bonuses, and a module's multiplier lands on top of both.
+-- rules, investments, alternate recipes, modules left to right, then the
+-- boss twist. A module's multiplier lands on top of the material bonuses.
 function Run:refreshRules()
   local mods = {}
   if self.map.premium > 0 then mods[#mods + 1] = Contracts.premium end
   for _, mod in ipairs(Investments.mods(self.levels)) do mods[#mods + 1] = mod end
-  if self.market then mods[#mods + 1] = Market.mod(self.market) end
   for _, id in ipairs(self.recipes) do mods[#mods + 1] = Alternates.byId[id] end
   for _, id in ipairs(self.upgrades) do mods[#mods + 1] = Upgrades.byId[id] end
   local c = self:contract()
@@ -227,7 +222,6 @@ end
 function Run:startContract()
   self.progress = 0
   self.shiftsUsed = 0
-  self.soldValue = {}
   self:clearRubble()
   self:openFaces()
   -- The sector's boss is known from its first contract.
@@ -239,29 +233,15 @@ end
 
 ---------------------------------------------------------------- offers
 
--- The two contracts on offer after the current one: each a plot (while the
--- site has room) and a market. Seen before the shop, so it can be shopped for.
+-- The two contracts on offer after the current one: each the plot of land
+-- it adds (while the site has room). Seen before the shop, so it can be
+-- shopped for.
 function Run:rollOffers()
   local c = self:contract(self.index + 1)
   local room = #self.map:free() > 0
-  local owned = self:kinds()
   local offers = {}
   for i = 1, 2 do
-    local plot = room and self:rollPlot(c.sector) or nil
-    local resources = self:resources(plot)
-    -- From the second sector on something slumps: on one offer the product
-    -- you sold most of, on the other any product you can make.
-    local slump
-    if c.sector >= 2 then slump = (i == 1 and self:topSeller()) or 'random' end
-    local market = Market.roll(self.marketRng, {
-      resources = resources, owned = owned, sector = c.sector, slump = slump,
-    })
-    local stretch = 0
-    for _, d in ipairs(market.demand) do
-      local missing = Market.missing(d.item, resources, owned)
-      if missing and #missing > 0 then stretch = stretch + 1 end
-    end
-    offers[i] = { plot = plot, market = market, bonus = stretch * Contracts.reward.perStretch }
+    offers[i] = { plot = room and self:rollPlot(c.sector) or nil }
   end
   self.offers, self.chosen = offers, nil
   return offers
@@ -271,15 +251,6 @@ function Run:choose(i)
   if not self.offers or not self.offers[i] then return false end
   self.chosen = self.offers[i]
   return true
-end
-
--- The item that earned the most on the current contract, or nil.
-function Run:topSeller()
-  local best, top
-  for item, value in pairs(self.soldValue) do
-    if not best or value > best or (value == best and item < top) then best, top = value, item end
-  end
-  return top
 end
 
 ---------------------------------------------------------------- blueprints
@@ -314,9 +285,6 @@ end
 function Run:endShift()
   local s = self.factory:endShift()
   self.progress = self.progress + s.total
-  for item, rec in pairs(s.sold) do
-    self.soldValue[item] = (self.soldValue[item] or 0) + rec.total
-  end
   local quota = self:contract().quota
   if self.progress >= quota then
     s.status = 'cleared'
@@ -337,14 +305,13 @@ function Run:payout()
     base = R.normal + R.perSector * (c.sector - 1) + (c.isBoss and R.boss or 0),
     unused = self:shiftsLeft() * R.perUnusedShift,
     interest = math.min(R.interestCap, math.floor(self.credits / R.interestPer)),
-    stretch = self.bonus or 0,
     overshoot = 0,
     times = self.progress / c.quota,
   }
   for _, step in ipairs(R.overshoot) do
     if p.times >= step[1] then p.overshoot = p.overshoot + step[2] end
   end
-  p.total = p.base + p.unused + p.interest + p.stretch + p.overshoot
+  p.total = p.base + p.unused + p.interest + p.overshoot
   self.credits = self.credits + p.total
   self.lastPayout = p
   return p
@@ -416,11 +383,7 @@ end
 function Run:advance()
   local offer = self.chosen or (self.offers and self.offers[1])
   self.index = self.index + 1
-  if offer then
-    self.market = offer.market
-    self.pendingPlot = offer.plot
-    self.bonus = offer.bonus
-  end
+  if offer then self.pendingPlot = offer.plot end
   self.offers, self.chosen = nil, nil
   self:startContract()
 end
@@ -433,12 +396,12 @@ function Run:snapshot()
   local F = self.factory
   local d = {
     seed = self.seed, credits = self.credits, index = self.index, progress = self.progress,
-    shiftsUsed = self.shiftsUsed, won = self.won, lost = self.lost, endless = self.endless, bonus = self.bonus,
+    shiftsUsed = self.shiftsUsed, won = self.won, lost = self.lost, endless = self.endless,
     blueprints = self.blueprints, upgrades = self.upgrades, levels = self.levels, recipes = self.recipes,
-    soldValue = self.soldValue, lastPayout = self.lastPayout,
-    rng = { layout = self.layoutRng.s, shop = self.shopRng.s, market = self.marketRng.s, boss = self.bossRng.s },
+    lastPayout = self.lastPayout,
+    rng = { layout = self.layoutRng.s, shop = self.shopRng.s, boss = self.bossRng.s },
     bossOrder = self.bossOrder, finalOrder = self.finalOrder, bosses = {},
-    market = self.market, offers = self.offers, reward = self.reward, pendingPlot = self.pendingPlot,
+    offers = self.offers, reward = self.reward, pendingPlot = self.pendingPlot,
     shop = self.shop and { offers = self.shop.offers, rerolls = self.shop.rerolls } or nil,
     plots = self.map.order, pieces = {}, rubble = {}, closed = false,
   }
@@ -451,7 +414,8 @@ function Run:snapshot()
     if e.rubble then
       d.rubble[#d.rubble + 1] = { e.pos.x, e.pos.y }
     elseif not b.fixed then
-      d.pieces[#d.pieces + 1] = { b.kind, e.pos.x, e.pos.y, b.dir, e.filter and e.filter.item or false }
+      d.pieces[#d.pieces + 1] = { b.kind, e.pos.x, e.pos.y, b.dir, e.filter and e.filter.item or false,
+        e.machine and e.machine.age or nil }
     elseif e.export and next(e.export.closed) then
       d.closed = true
     end
@@ -463,16 +427,17 @@ end
 function Run.restore(d)
   local r = setmetatable({}, Run)
   r.seed, r.credits, r.index, r.progress = d.seed, d.credits, d.index, d.progress
-  r.shiftsUsed, r.won, r.lost, r.endless, r.bonus = d.shiftsUsed, d.won or false, d.lost or false, d.endless, d.bonus
+  r.shiftsUsed, r.won, r.lost, r.endless = d.shiftsUsed, d.won or false, d.lost or false, d.endless
   r.blueprints, r.upgrades, r.levels, r.recipes = d.blueprints or {}, d.upgrades or {}, d.levels or {}, d.recipes or {}
-  r.soldValue, r.lastPayout = d.soldValue or {}, d.lastPayout
-  r.layoutRng, r.shopRng, r.marketRng, r.bossRng = Rng.new(1), Rng.new(1), Rng.new(1), Rng.new(1)
-  r.layoutRng.s, r.shopRng.s, r.marketRng.s, r.bossRng.s = d.rng.layout, d.rng.shop, d.rng.market, d.rng.boss
+  r.lastPayout = d.lastPayout
+  r.layoutRng, r.shopRng, r.bossRng = Rng.new(1), Rng.new(1), Rng.new(1)
+  r.layoutRng.s, r.shopRng.s, r.bossRng.s = d.rng.layout, d.rng.shop, d.rng.boss
   r.bossOrder, r.finalOrder, r.bosses = d.bossOrder, d.finalOrder, {}
   for sector, b in pairs(d.bosses or {}) do
     r.bosses[sector] = Bosses.make(Bosses.byId[b.id], b.params)
   end
-  r.market, r.offers, r.reward, r.pendingPlot = d.market, d.offers, d.reward, d.pendingPlot
+  -- (Saves from before markets were removed also hold one: it is ignored.)
+  r.offers, r.reward, r.pendingPlot = d.offers, d.reward, d.pendingPlot
   r.chosen = d.chosen and r.offers and r.offers[d.chosen] or nil
   r.shop = d.shop
 
@@ -484,9 +449,9 @@ function Run.restore(d)
     if not r.factory:at(t[1], t[2]) then r.factory:place('rubble', t[1], t[2], 0) end
   end
   for _, piece in ipairs(d.pieces or {}) do
-    local kind, x, y, dir, item = piece[1], piece[2], piece[3], piece[4], piece[5]
+    local kind, x, y, dir, item, age = piece[1], piece[2], piece[3], piece[4], piece[5], piece[6]
     if Machines[kind] and r.map:owned(x, y) and not r.factory:at(x, y) then
-      r.factory:place(kind, x, y, dir, { item = item or nil })
+      r.factory:place(kind, x, y, dir, { item = item or nil, age = age })
     end
   end
   if d.closed then r:closeFaces() end

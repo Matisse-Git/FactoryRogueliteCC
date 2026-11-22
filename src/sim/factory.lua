@@ -170,7 +170,9 @@ function Factory:place(kind, x, y, dir, extra)
   elseif kind == 'node' then
     e.node = true
   else
-    e.machine = { def = def }
+    -- age: shifts the machine has worked through where it stands. Turning
+    -- it keeps its age; moving it (taking it up and putting it down) does not.
+    e.machine = { def = def, age = extra.age or 0 }
     if not def.generator then e.slot = Transfer.newSlot(e, 'out') end
     Machine.reset(e)
   end
@@ -427,6 +429,7 @@ function Factory:endShift()
     shiftNo = s.shiftNo, busy = busy, machines = count,
   }
   local results = self.rules:shiftEnd(sc)
+  for i = 1, #machines do machines[i].machine.age = (machines[i].machine.age or 0) + 1 end
   local exact = s.revenue * sc.mult
   local total = math.floor(exact + 0.5)
   for _, res in ipairs(results) do

@@ -4,14 +4,14 @@
 --
 --   setup(r)            once when rules are built; tweak r.shiftLen, r.shifts,
 --                       r.basePower, r.maxPolish, r.exportPeriod, r.leakEvery,
---                       r.oven, r.demandBonus, r.demandUnlimited, r.slumpMult,
---                       or add recipes with r:addRecipe(kind, recipe)
+--                       r.oven, or add recipes with r:addRecipe(kind, recipe)
 --   sellAs(s, ctx)      change what an item counts as when sold
 --                       (ctx.type, ctx.mats[material] = true)
 --   value(s, ctx)       change ctx.value of one sale
 --   sold(s, ctx)        after a sale; keep counters in s (reset every shift)
 --   shiftEnd(s, sc)     end of shift; multiply sc.mult, add sc.notes
 --   speed(F, e)         return a speed multiplier for machine entity e
+--                       (e.machine.age: shifts it has worked where it stands)
 --   draw(F, e, watts)   return the watts machine entity e draws
 --
 -- ctx = { type, form, tier, mats, polished, units, dist, tick, len, value, premium, rules }
@@ -277,14 +277,21 @@ local list = {
     value = times(1.6, function(ctx) return countKeys(ctx.mats) >= 3 end),
   },
   {
-    id = 'bull_run', name = 'Bull Run', code = 'BR', color = 'cyan', rarity = 'uncommon',
-    desc = 'Products in demand pay x4 instead of x3.',
-    setup = function(r) r.demandBonus = r.demandBonus + 1 end,
+    id = 'mass_production', name = 'Mass Production', code = 'MP', color = 'green', rarity = 'uncommon',
+    desc = 'Each product sells for 2% more for every 5 of it already sold this shift, up to +100%.',
+    value = function(s, ctx)
+      local n = s.mass and s.mass[ctx.type] or 0
+      ctx.value = ctx.value * (1 + math.min(1, 0.02 * math.floor(n / 5)))
+    end,
+    sold = function(s, ctx)
+      s.mass = s.mass or {}
+      s.mass[ctx.type] = (s.mass[ctx.type] or 0) + ctx.units
+    end,
   },
   {
-    id = 'contrarian', name = 'Contrarian', code = 'CN', color = 'cyan', rarity = 'uncommon',
-    desc = 'The product that slumped sells for double instead of half.',
-    setup = function(r) r.slumpMult = 2 end,
+    id = 'old_faithful', name = 'Old Faithful', code = 'OF', color = 'blue', rarity = 'uncommon',
+    desc = 'Machines that have worked 3 shifts or more where they stand run 25% faster.',
+    speed = function(F, e) return (e.machine.age or 0) >= 3 and 1.25 or 1 end,
   },
   {
     id = 'leaky_splitter', name = 'Leaky Splitter', code = 'LS', color = 'blue', rarity = 'uncommon',
@@ -371,9 +378,17 @@ local list = {
     end,
   },
   {
-    id = 'cornered_market', name = 'Cornered Market', code = 'CM', color = 'cyan', rarity = 'rare',
-    desc = 'Demand never runs out: products in demand pay their bonus on every unit.',
-    setup = function(r) r.demandUnlimited = true end,
+    id = 'flagship', name = 'Flagship', code = 'FL', color = 'purple', rarity = 'rare',
+    desc = 'At the end of a shift, your best-selling product pays out again.',
+    shiftEnd = function(s, sc)
+      local top = 0
+      for _, rec in pairs(sc.sold) do top = math.max(top, rec.total) end
+      if top > 0 and sc.revenue > 0 then
+        local add = top / sc.revenue
+        sc.mult = sc.mult * (1 + add)
+        note(sc, 'Flagship', '+' .. math.floor(add * 100 + 0.5) .. '%')
+      end
+    end,
   },
 }
 

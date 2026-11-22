@@ -411,8 +411,9 @@ return function(App)
     wait(2)
     shot('05c_board')
     click(Board.at(2))
-    expect('board: TAKE picks that contract and opens the shop',
+    expect('board: SIGN picks that contract and opens the shop',
       App.state == 'shop' and App.run.chosen == App.run.offers[2])
+    local signedPlot = App.run.chosen.plot
     click(Shop.at.menu)
     expect('shop: MENU opens the pause menu', App.overlay == 'pause')
     App.keypressed('escape')
@@ -478,7 +479,7 @@ return function(App)
     expect('land: clicking your own plot does nothing', App.g.mode == 'annex')
     local ports = #f.world:query('port')
     local plot = App.run.pendingPlot
-    expect('land: it is the plot of the contract you took', plot ~= nil and App.run.market ~= nil)
+    expect('land: it is the plot of the contract you signed', plot ~= nil and plot == signedPlot)
     click(cell(free[2][1] * Map.PW + 4, free[2][2] * Map.PH + 3))
     expect('land: clicking a free slot places it',
       App.g.mode == 'intro' and App.run.map.count == 2 and App.run.map:has(free[2][1], free[2][2]))

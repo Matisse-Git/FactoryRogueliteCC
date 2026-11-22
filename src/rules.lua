@@ -41,10 +41,6 @@ function Rules.new(mods, base)
   r.exportPeriod = 1
   r.leakEvery = nil
   r.oven = false
-  r.demandBonus = 0            -- added to the multiplier of products in demand
-  r.demandUnlimited = false    -- demand pays on every unit
-  r.slumpMult = nil            -- replaces the multiplier of the slumped product
-  r.noDemand = false           -- nothing is in demand
   for _, m in ipairs(r.mods) do
     if m.setup then
       local before = {}

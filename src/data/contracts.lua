@@ -4,13 +4,14 @@
 local Contracts = {}
 
 -- Revenue quota per contract (summed over the contract's shifts): 12
--- contracts from $120 to $2.2M. The steps are steep while blueprints are
--- still being unlocked (x3 to x4) and ease to under x2 once growth has to
--- come from investments and modules. After the last one the run goes on in
+-- contracts from $120 to $1.8M. Items always sell at their own value, so the
+-- curve is that of one factory growing: steep while blueprints are still
+-- being unlocked (x3), easing step by step to x2 once growth has to come
+-- from investments and modules. After the last one the run goes on in
 -- endless mode at x2 per contract, faster than any factory grows.
 -- Fitted with `lovec . --bench`: see the Balance section of the README.
 Contracts.quotas = {
-  120, 500, 1500, 4500, 12000, 30000, 75000, 180000, 400000, 750000, 1300000, 2200000,
+  120, 380, 1100, 2900, 7300, 18000, 42000, 96000, 210000, 450000, 920000, 1800000,
 }
 Contracts.endlessGrowth = 2
 
@@ -49,7 +50,6 @@ Contracts.reward = {
   -- first, plus `boss` if it was one: later shops have more to spend.
   normal = 5, perSector = 3, boss = 3, perUnusedShift = 2, interestPer = 5, interestCap = 5,
   overshoot = { { 2, 2 }, { 4, 2 }, { 8, 2 } },     -- { times the quota, credits }
-  perStretch = 2,     -- a contract whose demand needs a machine you lack pays this much more
   noBlueprint = 5,    -- beating a boss with nothing left to unlock pays this instead
 }
 Contracts.startCredits = 4

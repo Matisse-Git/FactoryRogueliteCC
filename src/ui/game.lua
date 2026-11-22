@@ -19,8 +19,6 @@ local Fmt = require 'src.fmt'
 local Sfx = require 'src.sfx'
 local Records = require 'src.records'
 local Land = require 'src.ui.land'
-local Board = require 'src.ui.board'
-local Market = require 'src.market'
 local Factory = require 'src.sim.factory'
 local Map = require 'src.map'
 local D = require 'src.sim.dirs'
@@ -1089,7 +1087,6 @@ local function ledgerRows(app)
     local held = hidden[mod]
     rows[#rows + 1] = { mod = mod, delta = rec.delta - (held or 0), n = rec.n - (held and 1 or 0), i = #rows + 1 }
   end
-  if run.market then add(Market.mod(run.market)) end
   for _, id in ipairs(run.upgrades) do add(Upgrades.byId[id]) end
   add(Contracts.premium)
   local invested
@@ -1170,51 +1167,7 @@ local function drawSidebar(app)
     end
   end
 
-  -- The market: what is in demand this contract, and how much of each
-  -- demand this shift has filled.
   local y = 75
-  local market = run.market
-  if market then
-    UI.text('MARKET', x0, y, P.dim)
-    y = y + 8
-    for _, d in ipairs(market.demand) do
-      local filled = live and min(d.units, Market.filled(rules, d.item)) or 0
-      UI.sprite(Sprites.item[d.item], x0, y - 1)
-      UI.text('X' .. d.mult, x0 + 10, y + 1, P.green)
-      UI.textRight(live and (filled .. '/' .. d.units) or tostring(d.units), SX + SW - 3, y + 1,
-        filled >= d.units and P.green or (live and P.text or P.dim))
-      if UI.inside(SX, y - 1, SW, 9) then
-        local def = Items[d.item]
-        local tip = { title = def.name .. ' IN DEMAND', color = P.green, lines = {
-          'SELLS FOR X' .. d.mult .. ': ' .. Fmt.money(def.value * d.mult) .. ' INSTEAD OF ' .. Fmt.money(def.value) .. '.',
-          'ON THE FIRST ' .. d.units .. ' SOLD EACH SHIFT. AFTER THAT, THE NORMAL PRICE.' } }
-        local missing = Market.missing(d.item, run:resources(), run:kinds())
-        if missing == nil then
-          tip.lines[3] = 'NOTHING ON YOUR SITE MAKES IT.'
-        elseif #missing > 0 then
-          local names = {}
-          for i, kind in ipairs(missing) do names[i] = Machines[kind].name end
-          tip.lines[3] = 'NEEDS: ' .. table.concat(names, ', ') .. '.'
-        end
-        UI.tip = tip
-      end
-      y = y + 9
-    end
-    if market.slump then
-      local s = market.slump
-      UI.sprite(Sprites.item[s.item], x0, y - 1)
-      UI.text('X' .. num(s.mult), x0 + 10, y + 1, P.red)
-      UI.textRight('SLUMP', SX + SW - 3, y + 1, P.red)
-      if UI.inside(SX, y - 1, SW, 9) then
-        local def = Items[s.item]
-        UI.tip = { title = def.name .. ' SLUMP', color = P.red, lines = {
-          'SELLS FOR X' .. num(s.mult) .. ' THIS CONTRACT: ' .. Fmt.money(def.value * s.mult) ..
-          ' INSTEAD OF ' .. Fmt.money(def.value) .. '.' } }
-      end
-      y = y + 9
-    end
-    y = y + 2
-  end
 
   -- During a shift: the ledger. Otherwise: the keys that matter right now.
   local rows = live and ledgerRows(app)
@@ -1378,8 +1331,13 @@ local function drawIntro(app)
   local g, run = app.g, app.run
   local c, rules = run:contract(), run.rules
   dim()
-  local w, h = 200, 132
-  local x, y = floor(CX - w / 2), 22
+  -- The papers fit what they say; their foot (and the START button) stays put.
+  local help = c.index == 1 and Font.wrap('LAY BELTS FROM THE PORTS TO THE DEPOT. MACHINES ON THE WAY ADD VALUE: '
+    .. 'BUILD AS MANY AS YOUR POWER ALLOWS.', 46) or {}
+  local bossLines = c.boss and Font.wrap(c.boss.desc, 42) or {}
+  local body = (#help > 0 and #help * 7 + 2 or 0) + (c.boss and 8 + #bossLines * 7 or 0)
+  local w, h = 200, 37 + body + 26
+  local x, y = floor(CX - w / 2), 154 - h
   local cx = x + w / 2
   -- The contract's papers.
   UI.paper(x, y, w, h, { form = 'FORM C-' .. c.index })
@@ -1388,22 +1346,17 @@ local function drawIntro(app)
   if c.boss then UI.stamp('BOSS', x + 26, y + 17, P.red, 2, -0.25) end
   UI.textCenter(rules.shifts .. ' SHIFTS OF ' .. rules.shiftLen .. ' SECONDS', cx, y + 27, P.text)
   local yy = y + 37
-  if c.index == 1 then
-    for _, line in ipairs(Font.wrap('LAY BELTS FROM THE PORTS TO THE DEPOT. MACHINES ON THE WAY ADD VALUE: '
-        .. 'BUILD AS MANY AS YOUR POWER ALLOWS.', 46)) do
+  if #help > 0 then
+    for _, line in ipairs(help) do
       UI.textCenter(line, cx, yy, P.dim)
       yy = yy + 7
     end
     yy = yy + 2
   end
-  if run.market then
-    UI.text('IN DEMAND', x + 8, yy, P.green)
-    yy = Board.marketRows(run, run.market, nil, x + 8, yy + 8, w - 16) + 2
-  end
   if c.boss then
     UI.textCenter('BOSS: ' .. c.boss.name, cx, yy, P.red)
     yy = yy + 8
-    for _, line in ipairs(Font.wrap(c.boss.desc, 42)) do
+    for _, line in ipairs(bossLines) do
       UI.textCenter(line, cx, yy, P.text)
       yy = yy + 7
     end
